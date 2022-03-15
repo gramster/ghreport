@@ -31,7 +31,7 @@ You normally should not need to use the num argument unless you are experiencing
 timeouts from the GitHub API; in this case you may want to try a lower value.
 """
 
-__version__ = '0.3'
+__version__ = '0.4'
 
 from docopt import docopt
 from .ghreport import report
