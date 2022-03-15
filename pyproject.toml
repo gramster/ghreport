@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "ghreport"
-authors = [{name = "Graham Wheeler", email = "gram@geekraver.com"}]
+authors = [{name = "Graham Wheeler", email = "graham@grahamwheeler.com"}]
 readme = "README.md"
 license = {file = "LICENSE"}
 dynamic = ["version", "description"]
