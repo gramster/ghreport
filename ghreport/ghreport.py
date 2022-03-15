@@ -555,6 +555,7 @@ def report(owner, repo, token, out=None, verbose=False, days=7, stale=30, extra_
     else:
         result = report
     if out is not None:
+        out = now.strftime(out)
         with open(out, 'w') as f:
             f.write(result)
     else:

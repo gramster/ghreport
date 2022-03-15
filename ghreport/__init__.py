@@ -24,6 +24,8 @@ Options:
 
 Output is plain text, unless -o is used and the file name ends in .html, 
 in which case HTML with an embedded bug count chart will be written to the file.
+The file name specified with -o will be formatted using strftime so you can
+add dynamic elements based on the current date.
 
 You normally should not need to use the num argument unless you are experiencing
 timeouts from the GitHub API; in this case you may want to try a lower value.
