@@ -5,7 +5,11 @@ your repository that may be stale, or that may need a response.
 
 It can also generate a chart of open bug counts over time.
 
-See CONTRIBUTING.md for build instructions, or install from PyPI.
+See CONTRIBUTING.md for build instructions, or install from PyPI with:
+
+```
+python -m pip install ghreport
+```
 
 Use `ghreport -h` for help.
 
