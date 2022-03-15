@@ -44,6 +44,7 @@ def get_users_for_repo(owner:str, repo:str, token:str):
     """ 
     Get the team members for a repo that have push or admin rights. This is not
     public so if you are not in such a team (probably with admin rights) this will fail.
+    I haven't found a good way to use the GraphQL API for this so still uses REST API.
     """
     g = Github(token)
     ghrepo = g.get_repo(f'{owner}/{repo}')    
