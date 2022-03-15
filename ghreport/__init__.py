@@ -2,7 +2,7 @@
 ghreport.
 
 Usage:
-  ghreport <owner> <repo> <token> [-w] [-v] [-d DAYS] [-a] [-s DAYS] [-u USERS] [-b LABEL] [-x DAYS] [-n NUM]
+  ghreport <owner> <repo> <token> [-o FILE] [-v] [-d DAYS] [-a] [-s DAYS] [-u USERS] [-b LABEL] [-x DAYS] [-n NUM]
   ghreport -h | --help
   ghreport --version
 
@@ -10,7 +10,7 @@ Options:
   <owner>                 The Github repository owner.
   <repo>                  The Github repository name.
   <token>                 The Github API token used for authentication.
-  -w --web                Generate HTML output (with inline bug count chart).
+  -o FILE --out=FILE      Write output to specified file.
   -v --verbose            Show extra output like stats about GitHub API usage costs.
   -d DAYS --days=DAYS     Window size (days) for items in report as new (with '*'). [default: 7]
   -a --all                Show all relevant issues, not just those new in the window.
@@ -22,11 +22,14 @@ Options:
   -h --help               Show this screen.
   --version               Show version.
 
+Output is plain text, unless -o is used and the file name ends in .html, 
+in which case HTML with an embedded bug count chart will be written to the file.
+
 You normally should not need to use the num argument unless you are experiencing
 timeouts from the GitHub API; in this case you may want to try a lower value.
 """
 
-__version__ = '0.2'
+__version__ = '0.3'
 
 from docopt import docopt
 from .ghreport import report
@@ -37,7 +40,7 @@ def main():
     owner = arguments['<owner>']
     repo = arguments['<repo>']
     token = arguments['<token>']
-    web = arguments['--web']
+    out = arguments['--out']
     verbose = arguments['--verbose']
     all = int(arguments['--all'])
     days = int(arguments['--days'])
@@ -49,6 +52,6 @@ def main():
         xrange = 7
     if days < 1:
         days = 1
-    report(owner, repo, token, web, verbose, days=days, stale=stale, extra_users=extra_users, \
+    report(owner, repo, token, out, verbose, days=days, stale=stale, extra_users=extra_users, \
            bug_label=bug_label, xrange=xrange, show_all = all)
     

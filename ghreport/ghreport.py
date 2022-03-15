@@ -1,3 +1,4 @@
+import abc
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 import time
@@ -161,6 +162,10 @@ def get_who(obj, prop):
 
 def parse_date(datestr):
     return utc_to_local(datetime.strptime(datestr, '%Y-%m-%dT%H:%M:%SZ'))
+
+
+def format_date(d):
+    return f'{d.year}-{d.month:02d}-{d.day:02d}'
 
 
 def parse_raw_issue(issue, users, bug_label = 'bug'):
@@ -368,39 +373,61 @@ def plot_bug_rate(start:datetime, end:datetime, issues:List[Issue], who:str,
     return components(plot)
 
 
-def txtissue(repo_path: str, issue: Issue):
-    return f'{repo_path}/issues/{issue.number}'
+class FormatterABC(abc.ABC):
+    @abc.abstractmethod
+    def url(self, repo_path: str, issue: Issue) -> str: ...
+    @abc.abstractmethod
+    def heading(self, level: int, msg: str) -> str: ...
+    @abc.abstractmethod
+    def info(self, msg: str) -> str: ...
+    @abc.abstractmethod
+    def line(self, star: bool, repo_path: str, issue: Issue, msg: str) -> str: ...
 
 
-def htmlissue(repo_path: str, issue: Issue):
-    title = issue.title.replace('"', "&quot;")
-    return f'<a title="{title}" href="{repo_path}/issues/{issue.number}">{issue.number}</a>'
+class HTMLFormatter(FormatterABC):
+    def url(self, repo_path: str, issue: Issue) -> str:
+        title = issue.title.replace('"', "&quot;")
+        return f'<a title="{title}" href="{repo_path}/issues/{issue.number}">{issue.number}</a>'
+
+    def info(self, msg: str) -> str:
+        return f'<div>{msg}</div>\n'
+
+    def heading(self, level: int, msg: str) -> str:
+        return f'<h{level}>{msg}</h{level}>\n'
+
+    def line(self, star: bool, repo_path: str, issue: Issue, msg: str) -> str:
+        return f'<div>{"*" if star else " "} {self.url(repo_path, issue)}: {msg}</div>\n'
 
 
-def txt(line: str, tag: str = None):
-    return f'{line}\n'
+class TextFormatter(FormatterABC):
+    def url(self, repo_path: str, issue: Issue) -> str:
+        return f'{repo_path}/issues/{issue.number}'
+
+    def info(self, msg: str) -> str:
+        return f'\n{msg}\n\n'
+
+    def heading(self, level: int, msg: str) -> str:
+        return f'\n{msg}\n\n'
+
+    def line(self, star: bool, repo_path: str, issue: Issue, msg: str) -> str:
+        return f'{"*" if star else " "} {self.url(repo_path, issue)}: {msg}\n'
 
 
-def html(line: str, tag: str = None):
-    if tag is None:
-        tag = 'div'
-    return f'<{tag}>{line}</{tag}>\n'
-
-
-def find_revisits(owner:str, repo:str, issues:List[Issue], users:set, web: bool=False,
+def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], users:set, web: bool=False,
                   days: int=7, stale: int=30, show_all: bool=False):
     repo_path = f'https://github.com/{owner}/{repo}'
     
-    output = html if web else txt
-    urler = htmlissue if web else txtissue
+    formatter = HTMLFormatter() if web else TextFormatter()
 
+    report = formatter.heading(1, f'GITHUB ISSUES REPORT FOR {owner}/{repo}')
+    report += formatter.info(f'Generated on {format_date(now)} using: stale={stale}, all={show_all}')
     if show_all:
-        report = output('In lists below, * marks items that are new to report in past {days} day(s)\n')
+        report += formatter.info(f'* marks items that are new to report in past {days} day(s)')
     else:
-        report = output('In lists below, only showing items that are new to report in past {days} day(s)\n')
+        report += formatter.info(f'Only showing items that are new to report in past {days} day(s)')
 
     for bug_flag in [True, False]:
-        report += output(f'FOR ISSUES THAT ARE{"" if bug_flag else " NOT"} MARKED AS BUGS:\n', 'h2')
+        top_title = formatter.heading(2, f'FOR ISSUES THAT ARE{"" if bug_flag else " NOT"} MARKED AS BUGS:')
         title_done = False
         now = datetime.now()
         for issue in issues:
@@ -412,9 +439,12 @@ def find_revisits(owner:str, repo:str, issues:List[Issue], users:set, web: bool=
                 star = diff <= days
                 if star or show_all:
                     if not title_done:
-                        report += output(f'\nIssues in {repo} that need a response from team:', 'h3')
+                        report += top_title
+                        top_title = ''
+                        report += formatter.heading(3, f'\nIssues in {repo} that need a response from team:')
                         title_done = True
-                    report += output(f'{"*" if star else " "} {urler(repo_path, issue)} : needs an initial team response ({diff} days old)')
+                    report += formatter.line(star, repo_path, issue,
+                                  f'needs an initial team response ({diff} days old)')
 
         title_done = False
         for issue in issues:
@@ -429,9 +459,12 @@ def find_revisits(owner:str, repo:str, issues:List[Issue], users:set, web: bool=
                 star = op_days <= days
                 if star or show_all:
                     if not title_done:
-                        report += output(f'\nIssues in {repo} that have new comments from OP:', 'h3')
+                        report += top_title
+                        top_title = ''
+                        report += formatter.heading(3, f'\nIssues in {repo} that have new comments from OP:')
                         title_done = True 
-                    report += output(f'{"*" if star else " "} {urler(repo_path, issue)} : OP responded {op_days} days ago but team last responded {team_days} days ago')
+                    report += formatter.line(star, repo_path, issue,
+                                  f'OP responded {op_days} days ago but team last responded {team_days} days ago')
 
         title_done = False
         # TODO: if we get this running daily, we should make it so it only shows new instances that
@@ -449,9 +482,12 @@ def find_revisits(owner:str, repo:str, issues:List[Issue], users:set, web: bool=
                     star = diff <= days
                     if star or show_all:
                         if not title_done:
-                            report += output(f'\nIssues in {repo} that have newer comments from 3rd party {days} day(s) or more after last team response:', 'h3')
+                            report += top_title
+                            top_title = ''
+                            report += formatter.heading(3, f'\nIssues in {repo} that have newer comments from 3rd party {days} day(s) or more after last team response:')
                             title_done = True          
-                        report += output(f'{"*" if star else " "} {urler(repo_path, issue)} : 3rd party responded {other_days} days ago but team last responded {team_days} days ago')
+                        report += formatter.line(star, repo_path, issue,
+                                      f'3rd party responded {other_days} days ago but team last responded {team_days} days ago')
 
 
         title_done = False
@@ -469,18 +505,22 @@ def find_revisits(owner:str, repo:str, issues:List[Issue], users:set, web: bool=
                 star = diff < (stale+days)
                 if star or show_all:
                     if not title_done:
-                        report += output(f'\nIssues in {repo} that have no external responses since team response in {stale}+ days:', 'h3')
+                        report += top_title
+                        top_title = ''
+                        report += formatter.heading(3, f'\nIssues in {repo} that have no external responses since team response in {stale}+ days:')
                         title_done = True            
-                    report += output(f'{"*" if star else " "} {urler(repo_path, issue)} : team response was last response and no others in {diff} days')
+                    report += formatter.line(star, repo_path, issue, 
+                                  f'team response was last response and no others in {diff} days')
         if bug_flag:
-            report += output('\n=================================================================\n')
+            report += formatter.info('=================================================================')
 
     return report
 
 
 
-def report(owner, repo, token, web=False, verbose=False, days=7, stale=30, extra_users=None, bug_label='bug', \
+def report(owner, repo, token, out=None, verbose=False, days=7, stale=30, extra_users=None, bug_label='bug', \
            xrange=180, chunk=25, show_all=False):
+    web = out is not None and out.endswith('.html')
     # Get the users in the team
     users = get_users_for_repo(owner, repo, token)
     if extra_users:
@@ -491,26 +531,33 @@ def report(owner, repo, token, web=False, verbose=False, days=7, stale=30, extra
     issues = get_issues(owner, repo, token, users, chunk=chunk, bug_label=bug_label, verbose=verbose)
     now = datetime.now()
 
-    report = find_revisits(owner, repo, issues.values(), users=users, web=web, days=days,
+    report = find_revisits(now, owner, repo, issues.values(), users=users, web=web, days=days,
                                stale=stale, show_all=show_all)
 
     if web:
-        script, div = plot_bug_rate(now-timedelta(days=xrange), now, issues.values(), repo, [bug_label], interval=1, web=web)
-        print(f"""
-<!DOCTYPE html>
+        script, chartdiv = plot_bug_rate(now-timedelta(days=xrange), now, issues.values(),
+                               repo, [bug_label], interval=1, web=web)
+        result = f"""<!DOCTYPE html>
 <html lang="en">
     <head>
         <meta charset="utf-8">
-        <title>Repo report for {owner}/{repo} at {now}</title>
+        <title>Repo report for {owner}/{repo} on {format_date(now)}</title>
         <script src="https://cdn.bokeh.org/bokeh/release/bokeh-2.4.2.min.js"></script>
         {script}
     </head>
     <body>
-    {div}
     {report}
+    <br>
+    <br>
+    {chartdiv}
     </body>
-</html>""")
+</html>"""
     else:
-        print(report)
+        result = report
+    if out is not None:
+        with open(out, 'w') as f:
+            f.write(result)
+    else:
+        print(result)
 
 

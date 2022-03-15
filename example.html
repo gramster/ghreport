@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>Repo report for microsoft/debugpy on 2022-03-15</title>
+        <script src="https://cdn.bokeh.org/bokeh/release/bokeh-2.4.2.min.js"></script>
+        
+<script type="text/javascript">
+    (function() {
+          const fn = function() {
+            Bokeh.safely(function() {
+              (function(root) {
+                function embed_document(root) {
+                  
+                const docs_json = '{"ec11432b-263f-4469-b3fd-565523325fee":{"defs":[],"roots":{"references":[{"attributes":{"axis":{"id":"1011"},"coordinates":null,"grid_line_color":null,"grid_line_width":2,"group":null,"ticker":null},"id":"1014","type":"Grid"},{"attributes":{"mantissas":[1,2,5],"max_interval":500.0,"num_minor_ticks":0},"id":"1042","type":"AdaptiveTicker"},{"attributes":{"coordinates":null,"group":null},"id":"1032","type":"Title"},{"attributes":{},"id":"1039","type":"AllLabels"},{"attributes":{"base":60,"mantissas":[1,2,5,10,15,20,30],"max_interval":1800000.0,"min_interval":1000.0,"num_minor_ticks":0},"id":"1043","type":"AdaptiveTicker"},{"attributes":{"days":[1,8,15,22]},"id":"1047","type":"DaysTicker"},{"attributes":{"coordinates":null,"formatter":{"id":"1035"},"group":null,"major_label_policy":{"id":"1036"},"ticker":{"id":"1016"}},"id":"1015","type":"LinearAxis"},{"attributes":{"base":24,"mantissas":[1,2,4,6,8,12],"max_interval":43200000.0,"min_interval":3600000.0,"num_minor_ticks":0},"id":"1044","type":"AdaptiveTicker"},{"attributes":{"axis":{"id":"1015"},"coordinates":null,"dimension":1,"grid_line_color":"white","grid_line_width":2,"group":null,"ticker":null},"id":"1018","type":"Grid"},{"attributes":{},"id":"1053","type":"YearsTicker"},{"attributes":{},"id":"1016","type":"BasicTicker"},{"attributes":{"days":[1,4,7,10,13,16,19,22,25,28]},"id":"1046","type":"DaysTicker"},{"attributes":{"source":{"id":"1022"}},"id":"1027","type":"CDSView"},{"attributes":{"days":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]},"id":"1045","type":"DaysTicker"},{"attributes":{"tools":[{"id":"1019"}]},"id":"1020","type":"Toolbar"},{"attributes":{"months":[0,6]},"id":"1052","type":"MonthsTicker"},{"attributes":{},"id":"1019","type":"SaveTool"},{"attributes":{"days":[1,15]},"id":"1048","type":"DaysTicker"},{"attributes":{"coordinates":null,"formatter":{"id":"1038"},"group":null,"major_label_policy":{"id":"1039"},"major_label_text_font_size":"12pt","ticker":{"id":"1012"}},"id":"1011","type":"DatetimeAxis"},{"attributes":{"align":"center","coordinates":null,"group":null,"text":"Count"},"id":"1030","type":"Title"},{"attributes":{"months":[0,1,2,3,4,5,6,7,8,9,10,11]},"id":"1049","type":"MonthsTicker"},{"attributes":{"months":[0,2,4,6,8,10]},"id":"1050","type":"MonthsTicker"},{"attributes":{"line_alpha":0.2,"line_color":"navy","x":{"field":"x"},"y":{"field":"y"}},"id":"1025","type":"Line"},{"attributes":{},"id":"1038","type":"DatetimeTickFormatter"},{"attributes":{"months":[0,4,8]},"id":"1051","type":"MonthsTicker"},{"attributes":{},"id":"1040","type":"UnionRenderers"},{"attributes":{"line_alpha":0.1,"line_color":"navy","x":{"field":"x"},"y":{"field":"y"}},"id":"1024","type":"Line"},{"attributes":{"data":{"x":[1631796386721.169,1631882786721.169,1631969186721.169,1632055586721.169,1632141986721.169,1632228386721.169,1632314786721.169,1632401186721.169,1632487586721.169,1632573986721.169,1632660386721.169,1632746786721.169,1632833186721.169,1632919586721.169,1633005986721.169,1633092386721.169,1633178786721.169,1633265186721.169,1633351586721.169,1633437986721.169,1633524386721.169,1633610786721.169,1633697186721.169,1633783586721.169,1633869986721.169,1633956386721.169,1634042786721.169,1634129186721.169,1634215586721.169,1634301986721.169,1634388386721.169,1634474786721.169,1634561186721.169,1634647586721.169,1634733986721.169,1634820386721.169,1634906786721.169,1634993186721.169,1635079586721.169,1635165986721.169,1635252386721.169,1635338786721.169,1635425186721.169,1635511586721.169,1635597986721.169,1635684386721.169,1635770786721.169,1635857186721.169,1635943586721.169,1636029986721.169,1636116386721.169,1636202786721.169,1636289186721.169,1636375586721.169,1636461986721.169,1636548386721.169,1636634786721.169,1636721186721.169,1636807586721.169,1636893986721.169,1636980386721.169,1637066786721.169,1637153186721.169,1637239586721.169,1637325986721.169,1637412386721.169,1637498786721.169,1637585186721.169,1637671586721.169,1637757986721.169,1637844386721.169,1637930786721.169,1638017186721.169,1638103586721.169,1638189986721.169,1638276386721.169,1638362786721.169,1638449186721.169,1638535586721.169,1638621986721.169,1638708386721.169,1638794786721.169,1638881186721.169,1638967586721.169,1639053986721.169,1639140386721.169,1639226786721.169,1639313186721.169,1639399586721.169,1639485986721.169,1639572386721.169,1639658786721.169,1639745186721.169,1639831586721.169,1639917986721.169,1640004386721.169,1640090786721.169,1640177186721.169,1640263586721.169,1640349986721.169,1640436386721.169,1640522786721.169,1640609186721.169,1640695586721.169,1640781986721.169,1640868386721.169,1640954786721.169,1641041186721.169,1641127586721.169,1641213986721.169,1641300386721.169,1641386786721.169,1641473186721.169,1641559586721.169,1641645986721.169,1641732386721.169,1641818786721.169,1641905186721.169,1641991586721.169,1642077986721.169,1642164386721.169,1642250786721.169,1642337186721.169,1642423586721.169,1642509986721.169,1642596386721.169,1642682786721.169,1642769186721.169,1642855586721.169,1642941986721.169,1643028386721.169,1643114786721.169,1643201186721.169,1643287586721.169,1643373986721.169,1643460386721.169,1643546786721.169,1643633186721.169,1643719586721.169,1643805986721.169,1643892386721.169,1643978786721.169,1644065186721.169,1644151586721.169,1644237986721.169,1644324386721.169,1644410786721.169,1644497186721.169,1644583586721.169,1644669986721.169,1644756386721.169,1644842786721.169,1644929186721.169,1645015586721.169,1645101986721.169,1645188386721.169,1645274786721.169,1645361186721.169,1645447586721.169,1645533986721.169,1645620386721.169,1645706786721.169,1645793186721.169,1645879586721.169,1645965986721.169,1646052386721.169,1646138786721.169,1646225186721.169,1646311586721.169,1646397986721.169,1646484386721.169,1646570786721.169,1646657186721.169,1646743586721.169,1646829986721.169,1646916386721.169,1647002786721.169,1647089186721.169,1647175586721.169,1647261986721.169],"y":[13,13,13,13,13,13,13,13,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,16,16,16,16,16,16,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16]},"selected":{"id":"1041"},"selection_policy":{"id":"1040"}},"id":"1022","type":"ColumnDataSource"},{"attributes":{},"id":"1035","type":"BasicTickFormatter"},{"attributes":{},"id":"1041","type":"Selection"},{"attributes":{},"id":"1003","type":"DataRange1d"},{"attributes":{"align":"center","coordinates":null,"group":null,"text":"Open bug count for debugpy"},"id":"1028","type":"Title"},{"attributes":{},"id":"1036","type":"AllLabels"},{"attributes":{"above":[{"id":"1028"}],"background_fill_color":"#efefef","below":[{"id":"1011"},{"id":"1029"}],"center":[{"id":"1014"},{"id":"1018"}],"left":[{"id":"1015"},{"id":"1030"}],"renderers":[{"id":"1026"}],"title":{"id":"1032"},"toolbar":{"id":"1020"},"toolbar_location":"below","x_range":{"id":"1003"},"x_scale":{"id":"1007"},"y_range":{"id":"1031"},"y_scale":{"id":"1009"}},"id":"1002","subtype":"Figure","type":"Plot"},{"attributes":{"end":20},"id":"1031","type":"Range1d"},{"attributes":{"coordinates":null,"data_source":{"id":"1022"},"glyph":{"id":"1023"},"group":null,"hover_glyph":null,"muted_glyph":{"id":"1025"},"nonselection_glyph":{"id":"1024"},"view":{"id":"1027"}},"id":"1026","type":"GlyphRenderer"},{"attributes":{},"id":"1007","type":"LinearScale"},{"attributes":{"line_color":"navy","x":{"field":"x"},"y":{"field":"y"}},"id":"1023","type":"Line"},{"attributes":{"align":"center","coordinates":null,"group":null,"text":"Date"},"id":"1029","type":"Title"},{"attributes":{},"id":"1009","type":"LinearScale"},{"attributes":{"num_minor_ticks":5,"tickers":[{"id":"1042"},{"id":"1043"},{"id":"1044"},{"id":"1045"},{"id":"1046"},{"id":"1047"},{"id":"1048"},{"id":"1049"},{"id":"1050"},{"id":"1051"},{"id":"1052"},{"id":"1053"}]},"id":"1012","type":"DatetimeTicker"}],"root_ids":["1002"]},"title":"Bokeh Application","version":"2.4.2"}}';
+                const render_items = [{"docid":"ec11432b-263f-4469-b3fd-565523325fee","root_ids":["1002"],"roots":{"1002":"6eda433c-901c-45f0-b1bf-9cb35140d50e"}}];
+                root.Bokeh.embed.embed_items(docs_json, render_items);
+              
+                }
+                if (root.Bokeh !== undefined) {
+                  embed_document(root);
+                } else {
+                  let attempts = 0;
+                  const timer = setInterval(function(root) {
+                    if (root.Bokeh !== undefined) {
+                      clearInterval(timer);
+                      embed_document(root);
+                    } else {
+                      attempts++;
+                      if (attempts > 100) {
+                        clearInterval(timer);
+                        console.log("Bokeh: ERROR: Unable to run BokehJS code because BokehJS library is missing");
+                      }
+                    }
+                  }, 10, root)
+                }
+              })(window);
+            });
+          };
+          if (document.readyState != "loading") fn();
+          else document.addEventListener("DOMContentLoaded", fn);
+        })();
+</script>
+    </head>
+    <body>
+    <h1>GITHUB ISSUES REPORT FOR microsoft/debugpy</h1>
+<div>Generated on 2022-03-15 using: stale=30, all=0</div>
+<div>Only showing items that are new to report in past 7 day(s)</div>
+<div>=================================================================</div>
+<h2>FOR ISSUES THAT ARE NOT MARKED AS BUGS:</h2>
+<h3>
+Issues in debugpy that need a response from team:</h3>
+<div>* <a title="debugging through poetry drops subprocess" href="https://github.com/microsoft/debugpy/issues/865">865</a>: needs an initial team response (6 days old)</div>
+<div>* <a title="ipython support: provide a way to debug code only called from some frame" href="https://github.com/microsoft/debugpy/issues/869">869</a>: needs an initial team response (4 days old)</div>
+<h3>
+Issues in debugpy that have newer comments from 3rd party 7 day(s) or more after last team response:</h3>
+<div>* <a title="Support column breakpoints" href="https://github.com/microsoft/debugpy/issues/174">174</a>: 3rd party responded 881 days ago but team last responded 881 days ago</div>
+<div>* <a title="Performance in attached and detached state is similar." href="https://github.com/microsoft/debugpy/issues/204">204</a>: 3rd party responded 1008 days ago but team last responded 1008 days ago</div>
+<div>* <a title="When ungrouped, list and dict variables have inconvenient sort order" href="https://github.com/microsoft/debugpy/issues/278">278</a>: 3rd party responded 483 days ago but team last responded 484 days ago</div>
+<div>* <a title="Add test for &quot;qt&quot; debug config property" href="https://github.com/microsoft/debugpy/issues/309">309</a>: 3rd party responded 629 days ago but team last responded 629 days ago</div>
+<div>* <a title="Rework template settings" href="https://github.com/microsoft/debugpy/issues/461">461</a>: 3rd party responded 495 days ago but team last responded 495 days ago</div>
+<div>* <a title="Error message for embedded python adapter timeout" href="https://github.com/microsoft/debugpy/issues/480">480</a>: 3rd party responded 475 days ago but team last responded 476 days ago</div>
+<div>* <a title="Python debugger extension support" href="https://github.com/microsoft/debugpy/issues/517">517</a>: 3rd party responded 434 days ago but team last responded 434 days ago</div>
+<div>* <a title="Treat mapped files as my code" href="https://github.com/microsoft/debugpy/issues/561">561</a>: 3rd party responded 367 days ago but team last responded 368 days ago</div>
+<div>* <a title="Improve logging of loading of native library (used to set tracing to all threads)" href="https://github.com/microsoft/debugpy/issues/623">623</a>: 3rd party responded 283 days ago but team last responded 284 days ago</div>
+<div>* <a title="Internationalization (i18n)" href="https://github.com/microsoft/debugpy/issues/727">727</a>: 3rd party responded 173 days ago but team last responded 174 days ago</div>
+<div>* <a title="Support PEP 582 (__pypackages__) for just-my-code and user-uncaught exceptions" href="https://github.com/microsoft/debugpy/issues/750">750</a>: 3rd party responded 154 days ago but team last responded 154 days ago</div>
+<div>* <a title="use vscode to remote debug python program with tmux session " href="https://github.com/microsoft/debugpy/issues/783">783</a>: 3rd party responded 98 days ago but team last responded 98 days ago</div>
+<div>* <a title="Could not debug remote code with dataloaders which has num_workers>0" href="https://github.com/microsoft/debugpy/issues/818">818</a>: 3rd party responded 84 days ago but team last responded 85 days ago</div>
+
+    <br>
+    <br>
+    
+<div class="bk-root" id="6eda433c-901c-45f0-b1bf-9cb35140d50e" data-root-id="1002"></div>
+    </body>
+</html>
