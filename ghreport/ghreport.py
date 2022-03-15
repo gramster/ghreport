@@ -364,11 +364,7 @@ def plot_bug_rate(start:datetime, end:datetime, issues:List[Issue], who:str,
         start += timedelta(days=interval)
         last = count
     plot = plot_line(counts, f"Open bug count for {who}", "Date", "Count", x_axis_type="datetime", width=7)
-    if web:
-        return components(plot)
-    else:
-        save(plot)
-        return None, None
+    return components(plot)
 
 
 def txtissue(repo_path: str, issue: Issue):
@@ -390,13 +386,17 @@ def html(line: str, tag: str = None):
     return f'<{tag}>{line}</{tag}>\n'
 
 
-def find_revisits(owner:str, repo:str, issues:List[Issue], users:set, web: bool=False):
+def find_revisits(owner:str, repo:str, issues:List[Issue], users:set, web: bool=False,
+                  days: int=7, stale: int=30, show_all: bool=False):
     repo_path = f'https://github.com/{owner}/{repo}'
     
     output = html if web else txt
     urler = htmlissue if web else txtissue
 
-    report = output('In lists below, * marks items that are new to report in past day\n')
+    if show_all:
+        report = output('In lists below, * marks items that are new to report in past {days} day(s)\n')
+    else:
+        report = output('In lists below, only showing items that are new to report in past {days} day(s)\n')
 
     for bug_flag in [True, False]:
         report += output(f'FOR ISSUES THAT ARE{"" if bug_flag else " NOT"} MARKED AS BUGS:\n', 'h2')
@@ -407,11 +407,13 @@ def find_revisits(owner:str, repo:str, issues:List[Issue], users:set, web: bool=
                 continue
             # has the OP responded after a team member?
             if not issue.closed_at and not issue.last_team_response_at:
-                if not title_done:
-                    report += output(f'\nIssues in {repo} that need a response from team:', 'h3')
-                    title_done = True
-                days = date_diff(now, issue.created_at).days
-                report += output(f'{"*" if days <= 1 else " "} {urler(repo_path, issue)} : needs an initial team response ({days} days old)')
+                diff = date_diff(now, issue.created_at).days
+                star = diff <= days
+                if star or show_all:
+                    if not title_done:
+                        report += output(f'\nIssues in {repo} that need a response from team:', 'h3')
+                        title_done = True
+                    report += output(f'{"*" if star else " "} {urler(repo_path, issue)} : needs an initial team response ({diff} days old)')
 
         title_done = False
         for issue in issues:
@@ -421,12 +423,14 @@ def find_revisits(owner:str, repo:str, issues:List[Issue], users:set, web: bool=
             if issue.closed_at or not issue.last_team_response_at:
                 continue
             if issue.last_op_response_at and issue.last_op_response_at > issue.last_team_response_at:
-                if not title_done:
-                    report += output(f'\nIssues in {repo} that have new comments from OP:', 'h3')
-                    title_done = True 
                 op_days = date_diff(now, issue.last_op_response_at).days 
                 team_days = date_diff(now, issue.last_team_response_at).days            
-                report += output(f'{"*" if op_days <= 1 else " "} {urler(repo_path, issue)} : OP responded {op_days} days ago but team last responded {team_days} days ago')
+                star = op_days <= days
+                if star or show_all:
+                    if not title_done:
+                        report += output(f'\nIssues in {repo} that have new comments from OP:', 'h3')
+                        title_done = True 
+                    report += output(f'{"*" if star else " "} {urler(repo_path, issue)} : OP responded {op_days} days ago but team last responded {team_days} days ago')
 
         title_done = False
         # TODO: if we get this running daily, we should make it so it only shows new instances that
@@ -437,14 +441,16 @@ def find_revisits(owner:str, repo:str, issues:List[Issue], users:set, web: bool=
             if issue.closed_at:
                 continue
             elif issue.last_team_response_at and issue.last_response_at > issue.last_team_response_at:
-                other_days = date_diff(now, issue.last_response_at).days 
-                team_days = date_diff(now, issue.last_team_response_at).days 
-                diff = team_days - other_days
-                if diff >= 3:
-                    if not title_done:
-                        report += output(f'\nIssues in {repo} that have newer comments from 3rd party 3 days or more after last team response:', 'h3')
-                        title_done = True          
-                    report += output(f'{"*" if diff == 3 else " "} {urler(repo_path, issue)} : 3rd party responded {other_days} days ago but team last responded {team_days} days ago')
+                if issue.last_response_at > issue.last_team_response_at:
+                    other_days = date_diff(now, issue.last_response_at).days 
+                    team_days = date_diff(now, issue.last_team_response_at).days 
+                    diff = team_days - other_days
+                    star = diff <= days
+                    if star or show_all:
+                        if not title_done:
+                            report += output(f'\nIssues in {repo} that have newer comments from 3rd party {days} day(s) or more after last team response:', 'h3')
+                            title_done = True          
+                        report += output(f'{"*" if star else " "} {urler(repo_path, issue)} : 3rd party responded {other_days} days ago but team last responded {team_days} days ago')
 
 
         title_done = False
@@ -456,13 +462,15 @@ def find_revisits(owner:str, repo:str, issues:List[Issue], users:set, web: bool=
             elif issue.created_by in users:
                 continue
             elif issue.last_team_response_at and issue.last_response_at == issue.last_team_response_at:
-                days = date_diff(now, issue.last_response_at).days
-                if days < 30:
+                diff = date_diff(now, issue.last_response_at).days
+                if diff < stale:
                     continue
-                if not title_done:
-                    report += output(f'\nIssues in {repo} that have no external responses since team response in 30+ days:', 'h3')
-                    title_done = True            
-                report += output(f'{"*" if days == 30 else " "} {urler(repo_path, issue)} : team response was last response and no others in {days} days')
+                star = diff < (stale+days)
+                if star or show_all:
+                    if not title_done:
+                        report += output(f'\nIssues in {repo} that have no external responses since team response in {stale}+ days:', 'h3')
+                        title_done = True            
+                    report += output(f'{"*" if star else " "} {urler(repo_path, issue)} : team response was last response and no others in {diff} days')
         if bug_flag:
             report += output('\n=================================================================\n')
 
@@ -470,7 +478,8 @@ def find_revisits(owner:str, repo:str, issues:List[Issue], users:set, web: bool=
 
 
 
-def report(owner, repo, token, web=False, verbose=False, extra_users=None, bug_label='bug', chart=None, days=180, chunk=25):
+def report(owner, repo, token, web=False, verbose=False, days=7, stale=30, extra_users=None, bug_label='bug', \
+           xrange=180, chunk=25, show_all=False):
     # Get the users in the team
     users = get_users_for_repo(owner, repo, token)
     if extra_users:
@@ -481,16 +490,11 @@ def report(owner, repo, token, web=False, verbose=False, extra_users=None, bug_l
     issues = get_issues(owner, repo, token, users, chunk=chunk, bug_label=bug_label, verbose=verbose)
     now = datetime.now()
 
-    if web or chart:
-        if chart:
-            output_file(chart)
-        script, div = plot_bug_rate(now-timedelta(days=days), now, issues.values(), repo, [bug_label], interval=1, web=web)
-    else:
-        script, div = '', ''
-
-    report = find_revisits(owner, repo, issues.values(), users, web)
+    report = find_revisits(owner, repo, issues.values(), users=users, web=web, days=days,
+                               stale=stale, show_all=show_all)
 
     if web:
+        script, div = plot_bug_rate(now-timedelta(days=xrange), now, issues.values(), repo, [bug_label], interval=1, web=web)
         print(f"""
 <!DOCTYPE html>
 <html lang="en">
