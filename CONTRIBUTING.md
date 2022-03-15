@@ -9,7 +9,7 @@ You should then have a local copy available as 'ghreport'.
 
 To make a release,
 
-  1) Update README.md and the __version__ in ghreport/__init__.py
+  1) Update README.md and the \__version__ in ghreport/\__init__.py
   2) Run 'flit install'
   3) Test the installed ghreport locally
   4) Upload to PyPI: 'flit publish'
