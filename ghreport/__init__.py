@@ -2,7 +2,7 @@
 ghreport.
 
 Usage:
-  ghreport <owner> <repo> <token> [-v|--verbose] [--users=USERS] [--bug=LABEL] [--chart=CHART] [--days=DAYS] [--num=NUM]
+  ghreport <owner> <repo> <token> [-w | -c CHART]  [-v] [-u USERS] [-b LABEL] [-d DAYS] [-n NUM]
   ghreport -h | --help
   ghreport --version
 
@@ -10,10 +10,11 @@ Options:
   <owner>                 The Github repository owner.
   <repo>                  The Github repository name.
   <token>                 The Github API token used for authentication.
+  -w --web                Generate HTML output (with inline chart).
+  -c CHART --chart=CHART  Write the chart output to a specified file
   -v --verbose            Show extra output like stats about GitHub API usage costs.
   -u USERS --users=USERS  Comma-separated list of extra users to consider as team members.
   -b LABEL --bug=LABEL    The label used to identify issues that are considered bugs [default: bug]
-  -c CHART --chart=CHART  Filename to save a bug rate chart to.
   -d DAYS --days=DAYS     How many days to plot the chart for [default: 180]
   -n NUM --num=NUM        How many issues to fetch per API request [default: 25]
   -h --help               Show this screen.
@@ -34,6 +35,7 @@ def main():
     owner = arguments['<owner>']
     repo = arguments['<repo>']
     token = arguments['<token>']
+    web = arguments['--web']
     verbose = arguments['--verbose']
     extra_users = arguments['--users']
     bug_label = arguments['--bug']
@@ -41,5 +43,5 @@ def main():
     days = int(arguments['--days'])
     if days < 7:
         days = 7
-    report(owner, repo, token, verbose, extra_users=extra_users, bug_label=bug_label, chart=chart, days=days)
+    report(owner, repo, token, web, verbose, extra_users=extra_users, bug_label=bug_label, chart=chart, days=days)
     
