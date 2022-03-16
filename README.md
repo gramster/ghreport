@@ -13,7 +13,7 @@ python -m pip install ghreport
 
 Use `ghreport -h` for help.
 
-For an example report, see https://github.com/gramster/ghreport/blob/main/example.html
+For an example report, see https://github.com/gramster/ghreport/blob/main/example.md
 
 ## Version History
 
@@ -24,4 +24,6 @@ For an example report, see https://github.com/gramster/ghreport/blob/main/exampl
 0.3 Add -o option
 
 0.4 Apply strftime to output file name
+
+0.5 Added markdown support
  

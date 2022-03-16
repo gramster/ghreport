@@ -11,7 +11,7 @@ Options:
   <token>                 The Github API token used for authentication.
   -o FILE --out=FILE      Write output to specified file.
   -v --verbose            Show extra output like stats about GitHub API usage costs.
-  -d DAYS --days=DAYS     Window size (days) for items in report as new (with '*'). [default: 7]
+  -d DAYS --days=DAYS     Window size (days) for items in report as new (with '*'). [default: 1]
   -a --all                Show all relevant issues, not just those new in the window.
   -s DAYS --stale=DAYS    Window size (days) for marking issues with no 3rd party follow up as stale. [default: 30]
   -u USERS --users=USERS  Comma-separated list of extra users to consider as team members.
@@ -22,7 +22,8 @@ Options:
   --version               Show version.
 
 Output is plain text, unless -o is used and the file name ends in .html, 
-in which case HTML with an embedded bug count chart will be written to the file.
+in which case HTML with an embedded bug count chart will be written to the file,
+or if the file name ends in '.md', in which case Markdown will be used (no chart).
 The file name specified with -o will be formatted using strftime so you can
 add dynamic elements based on the current date.
 
@@ -30,7 +31,7 @@ You normally should not need to use the num argument unless you are experiencing
 timeouts from the GitHub API; in this case you may want to try a lower value.
 """
 
-__version__ = '0.5'
+__version__ = '0.6'
 
 from docopt import docopt, DocoptExit
 from .ghreport import report

@@ -356,8 +356,7 @@ def plot_line(data, title:str, x_title:str, y_title:str, x_axis_type=None, width
     
     
 def plot_bug_rate(start:datetime, end:datetime, issues:List[Issue], who:str,
-                  must_include_labels:List[str], must_exclude_labels:Optional[List[str]]=None, interval=7,
-                  web:bool=False):
+                  must_include_labels:List[str], must_exclude_labels:Optional[List[str]]=None, interval=7):
     counts = []
     dates = []
     counts = {}
@@ -413,12 +412,29 @@ class TextFormatter(FormatterABC):
         return f'{"*" if star else " "} {self.url(repo_path, issue)}: {msg}\n'
 
 
-def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], users:set, web: bool=False,
+class MarkdownFormatter(FormatterABC):
+    def url(self, repo_path: str, issue: Issue) -> str:
+        link = f'{repo_path}/issues/{issue.number}'
+        title = issue.title.replace('"', '&quot;')
+        return f'[{issue.number}]({link} "{title}")'
+
+    def info(self, msg: str) -> str:
+        return f'\n{msg}\n\n'
+
+    def heading(self, level: int, msg: str) -> str:
+        return f'\n{"#"*level} {msg}\n\n'
+
+    def line(self, star: bool, repo_path: str, issue: Issue, msg: str) -> str:
+        if star:
+            return f'\n\* {self.url(repo_path, issue)}: {msg}\n'
+        else:
+            return f'\n  {self.url(repo_path, issue)}: {msg}\n'
+
+
+def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], users:set, formatter: FormatterABC,
                   days: int=7, stale: int=30, show_all: bool=False):
     repo_path = f'https://github.com/{owner}/{repo}'
     
-    formatter = HTMLFormatter() if web else TextFormatter()
-
     report = formatter.heading(1, f'GITHUB ISSUES REPORT FOR {owner}/{repo}')
     report += formatter.info(f'Generated on {format_date(now)} using: stale={stale}, all={show_all}')
     if show_all:
@@ -441,7 +457,7 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], users:
                     if not title_done:
                         report += top_title
                         top_title = ''
-                        report += formatter.heading(3, f'\nIssues in {repo} that need a response from team:')
+                        report += formatter.heading(3, f'Issues in {repo} that need a response from team:')
                         title_done = True
                     report += formatter.line(star, repo_path, issue,
                                   f'needs an initial team response ({diff} days old)')
@@ -461,7 +477,7 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], users:
                     if not title_done:
                         report += top_title
                         top_title = ''
-                        report += formatter.heading(3, f'\nIssues in {repo} that have new comments from OP:')
+                        report += formatter.heading(3, f'Issues in {repo} that have new comments from OP:')
                         title_done = True 
                     report += formatter.line(star, repo_path, issue,
                                   f'OP responded {op_days} days ago but team last responded {team_days} days ago')
@@ -484,7 +500,7 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], users:
                         if not title_done:
                             report += top_title
                             top_title = ''
-                            report += formatter.heading(3, f'\nIssues in {repo} that have newer comments from 3rd party {days} day(s) or more after last team response:')
+                            report += formatter.heading(3, f'Issues in {repo} that have newer comments from 3rd party {days} day(s) or more after last team response:')
                             title_done = True          
                         report += formatter.line(star, repo_path, issue,
                                       f'3rd party responded {other_days} days ago but team last responded {team_days} days ago')
@@ -507,7 +523,7 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], users:
                     if not title_done:
                         report += top_title
                         top_title = ''
-                        report += formatter.heading(3, f'\nIssues in {repo} that have no external responses since team response in {stale}+ days:')
+                        report += formatter.heading(3, f'Issues in {repo} that have no external responses since team response in {stale}+ days:')
                         title_done = True            
                     report += formatter.line(star, repo_path, issue, 
                                   f'team response was last response and no others in {diff} days')
@@ -518,9 +534,12 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], users:
 
 
 
-def report(owner, repo, token, out=None, verbose=False, days=7, stale=30, extra_users=None, bug_label='bug', \
+def report(owner, repo, token, out=None, verbose=False, days=1, stale=30, extra_users=None, bug_label='bug', \
            xrange=180, chunk=25, show_all=False):
-    web = out is not None and out.endswith('.html')
+
+    fmt = out[out.rfind('.'):] if out is not None else '.txt'
+    formatter = HTMLFormatter() if fmt == '.html' else \
+                (MarkdownFormatter() if fmt == '.md' else TextFormatter())
     # Get the users in the team
     users = get_users_for_repo(owner, repo, token)
     if extra_users:
@@ -531,12 +550,12 @@ def report(owner, repo, token, out=None, verbose=False, days=7, stale=30, extra_
     issues = get_issues(owner, repo, token, users, chunk=chunk, bug_label=bug_label, verbose=verbose)
     now = datetime.now()
 
-    report = find_revisits(now, owner, repo, issues.values(), users=users, web=web, days=days,
+    report = find_revisits(now, owner, repo, issues.values(), users=users, formatter=formatter, days=days,
                                stale=stale, show_all=show_all)
 
-    if web:
+    if fmt == '.html':
         script, chartdiv = plot_bug_rate(now-timedelta(days=xrange), now, issues.values(),
-                               repo, [bug_label], interval=1, web=web)
+                               repo, [bug_label], interval=1)
         result = f"""<!DOCTYPE html>
 <html lang="en">
     <head>
