@@ -2,13 +2,12 @@
 ghreport.
 
 Usage:
-  ghreport <owner> <repo> <token> [-o FILE] [-v] [-d DAYS] [-a] [-s DAYS] [-u USERS] [-b LABEL] [-x DAYS] [-n NUM]
+  ghreport <repo> <token> [-o FILE] [-v] [-d DAYS] [-a] [-s DAYS] [-u USERS] [-b LABEL] [-x DAYS] [-n NUM]
   ghreport -h | --help
   ghreport --version
 
 Options:
-  <owner>                 The Github repository owner.
-  <repo>                  The Github repository name.
+  <repo>                  The Github repository (e.g. gramster/ghreport).
   <token>                 The Github API token used for authentication.
   -o FILE --out=FILE      Write output to specified file.
   -v --verbose            Show extra output like stats about GitHub API usage costs.
@@ -31,16 +30,20 @@ You normally should not need to use the num argument unless you are experiencing
 timeouts from the GitHub API; in this case you may want to try a lower value.
 """
 
-__version__ = '0.4'
+__version__ = '0.5'
 
-from docopt import docopt
+from docopt import docopt, DocoptExit
 from .ghreport import report
 
 
 def main():
     arguments = docopt(__doc__, version=__version__)
-    owner = arguments['<owner>']
-    repo = arguments['<repo>']
+    components = arguments['<repo>'].split('/')
+    if len(components) == 2:
+        owner, repo = components
+    else:
+        raise DocoptExit()
+
     token = arguments['<token>']
     out = arguments['--out']
     verbose = arguments['--verbose']
