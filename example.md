@@ -14,8 +14,7 @@ Only showing items that are new to report in past 1 day(s)
 ## FOR ISSUES THAT ARE NOT MARKED AS BUGS:
 
 
-### 
-Issues in debugpy that have newer comments from 3rd party 1 day(s) or more after last team response:
+### Issues in debugpy that have newer comments from 3rd party 1 day(s) or more after last team response:
 
 
 \* [174](https://github.com/microsoft/debugpy/issues/174 "Support column breakpoints"): 3rd party responded 881 days ago but team last responded 882 days ago
