@@ -26,4 +26,6 @@ For an example report, see https://github.com/gramster/ghreport/blob/main/exampl
 0.4 Apply strftime to output file name
 
 0.5 Added markdown support
+
+0.6 Remove hardcoded owner from query
  

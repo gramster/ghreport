@@ -65,13 +65,13 @@ def get_users_for_repo(owner:str, repo:str, token:str):
 
 
 issues_query = """
-query ($repo: String!, $cursor: String, $chunk: Int) {
+query ($owner: String!, $repo: String!, $cursor: String, $chunk: Int) {
   rateLimit {
     remaining
     cost
     resetAt
   }
-  repository(owner: "microsoft", name: $repo) {
+  repository(owner: $owner, name: $repo) {
     issues(first: $chunk, after: $cursor) {
       totalCount
       pageInfo {
@@ -249,7 +249,7 @@ async def get_raw_issues(owner:str, repo:str, token:str, chunk:int = 25, verbose
                                        oauth_token=token)
         reset_at = None
         while True:
-            result = await gh.graphql(issues_query, repo=repo, cursor=cursor, chunk=chunk)
+            result = await gh.graphql(issues_query, owner=owner, repo=repo, cursor=cursor, chunk=chunk)
             limit = result['rateLimit']                
             reset_at = parse_date(limit['resetAt'])                
 
