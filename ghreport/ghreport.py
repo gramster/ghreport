@@ -453,12 +453,13 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], member
     else:
         report += formatter.info(f'Only showing items that are new to report in past {days} day(s)')
 
+    shown = set()
     for bug_flag in [True, False]:
         top_title = formatter.heading(2, f'FOR ISSUES THAT ARE{"" if bug_flag else " NOT"} MARKED AS BUGS:')
         title_done = False
         now = datetime.now()
         for issue in issues:
-            if issue.is_bug != bug_flag:
+            if issue.is_bug != bug_flag or issue.created_by in members:
                 continue
             # has the OP responded after a team member?
             if not issue.closed_at and not issue.last_team_response_at:
@@ -470,15 +471,16 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], member
                         top_title = ''
                         report += formatter.heading(3, f'Issues in {repo} that need a response from team:')
                         title_done = True
+                    shown.add(issue.number)
                     report += formatter.line(star, repo_path, issue,
                                   f'needs an initial team response ({diff} days old)')
 
         title_done = False
         for issue in issues:
-            if issue.is_bug != bug_flag:
+            if issue.is_bug != bug_flag or issue.created_by in members:
                 continue            
             # has the OP responded after a team member?
-            if issue.closed_at or not issue.last_team_response_at:
+            if issue.closed_at or not issue.last_team_response_at or issue.number in shown:
                 continue
             if issue.last_op_response_at and issue.last_op_response_at > issue.last_team_response_at:
                 op_days = date_diff(now, issue.last_op_response_at).days 
@@ -488,8 +490,9 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], member
                     if not title_done:
                         report += top_title
                         top_title = ''
-                        report += formatter.heading(3, f'Issues in {repo} that have new comments from OP:')
+                        report += formatter.heading(3, f'Issues in {repo} that have comments from OP after last team response:')
                         title_done = True 
+                    shown.add(issue.number)
                     report += formatter.line(star, repo_path, issue,
                                   f'OP responded {op_days} days ago but team last responded {team_days} days ago')
 
@@ -497,33 +500,28 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], member
         # TODO: if we get this running daily, we should make it so it only shows new instances that
         # weren't reported before. For now we asterisk those.
         for issue in issues:
-            if issue.is_bug != bug_flag:
-                continue            
-            if issue.closed_at:
+            if issue.is_bug != bug_flag or issue.closed_at or issue.number in shown:
                 continue
             elif issue.last_team_response_at and issue.last_response_at > issue.last_team_response_at:
                 if issue.last_response_at > issue.last_team_response_at:
                     other_days = date_diff(now, issue.last_response_at).days 
                     team_days = date_diff(now, issue.last_team_response_at).days 
                     diff = team_days - other_days
-                    star = diff <= days
+                    star = other_days <= days
                     if star or show_all:
                         if not title_done:
                             report += top_title
                             top_title = ''
-                            report += formatter.heading(3, f'Issues in {repo} that have newer comments from 3rd party {days} day(s) or more after last team response:')
+                            report += formatter.heading(3, f'Issues in {repo} that have comments from 3rd party after last team response:')
                             title_done = True          
+                        shown.add(issue.number)
                         report += formatter.line(star, repo_path, issue,
                                       f'3rd party responded {other_days} days ago but team last responded {team_days} days ago')
 
 
         title_done = False
         for issue in issues:
-            if issue.is_bug != bug_flag:
-                continue            
-            if issue.closed_at:
-                continue
-            elif issue.created_by in members:
+            if issue.is_bug != bug_flag or issue.closed or issue.number in shown or issue.created_by in members:
                 continue
             elif issue.last_team_response_at and issue.last_response_at == issue.last_team_response_at:
                 diff = date_diff(now, issue.last_response_at).days
@@ -536,6 +534,7 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], member
                         top_title = ''
                         report += formatter.heading(3, f'Issues in {repo} that have no external responses since team response in {stale}+ days:')
                         title_done = True            
+                    shown.add(issue.number)
                     report += formatter.line(star, repo_path, issue, 
                                   f'team response was last response and no others in {diff} days')
         if bug_flag:

@@ -32,4 +32,7 @@ For an example report, see https://github.com/gramster/ghreport/blob/main/exampl
 0.8 Better team option
 
 0.9 Add proper markdown line rule
+
+0.11 Fix 3rd party report; exclude issues created by team from other reports
+
  
