@@ -521,7 +521,7 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], member
 
         title_done = False
         for issue in issues:
-            if issue.is_bug != bug_flag or issue.closed or issue.number in shown or issue.created_by in members:
+            if issue.is_bug != bug_flag or issue.closed_at or issue.number in shown or issue.created_by in members:
                 continue
             elif issue.last_team_response_at and issue.last_response_at == issue.last_team_response_at:
                 diff = date_diff(now, issue.last_response_at).days
