@@ -41,7 +41,7 @@ class Issue:
     is_bug: bool
 
 
-def get_users_for_repo(owner:str, repo:str, token:str):
+def get_members(owner:str, repo:str, token:str) -> set:
     """ 
     Get the team members for a repo that have push or admin rights. This is not
     public so if you are not in such a team (probably with admin rights) this will fail.
@@ -168,7 +168,7 @@ def format_date(d):
     return f'{d.year}-{d.month:02d}-{d.day:02d}'
 
 
-def parse_raw_issue(issue, users, bug_label = 'bug'):
+def parse_raw_issue(issue, members, bug_label = 'bug'):
     try:
         number = issue['number']
         title = issue['title']
@@ -182,7 +182,7 @@ def parse_raw_issue(issue, users, bug_label = 'bug'):
         is_bug = False
 
         # Treat the initial description as a response if by a team member    
-        response_at = created_at if created_by in users else None
+        response_at = created_at if created_by in members else None
         first_team_response_at = response_at
         last_team_response_at = response_at
         last_op_response_at = response_at
@@ -214,7 +214,7 @@ def parse_raw_issue(issue, users, bug_label = 'bug'):
                 if l:
                     eventtime = parse_date(event['lastEditedAt'])
                 who = get_who(event, 'author')               
-                if who in users:
+                if who in members:
                     last_team_response_at = eventtime
                     if first_team_response_at is None:
                         first_team_response_at = eventtime
@@ -282,7 +282,7 @@ async def get_raw_issues(owner:str, repo:str, token:str, chunk:int = 25, verbose
     return issues
 
 
-def get_issues(owner:str, repo:str, token:str, users:set, chunk:int = 25, raw_issues=None,
+def get_issues(owner:str, repo:str, token:str, members:set, chunk:int = 25, raw_issues=None,
                bug_label:str = 'bug', verbose:bool = False):
     if raw_issues is None:
         # non-Jupyter case
@@ -291,7 +291,7 @@ def get_issues(owner:str, repo:str, token:str, users:set, chunk:int = 25, raw_is
         raw_issues = asyncio.run(get_raw_issues(owner, repo, token, chunk=chunk, verbose=verbose)) 
     issues = {}    
     for issue in raw_issues:
-        issues[issue['number']] = parse_raw_issue(issue, users, bug_label=bug_label)
+        issues[issue['number']] = parse_raw_issue(issue, members, bug_label=bug_label)
     return issues
 
 
@@ -431,7 +431,7 @@ class MarkdownFormatter(FormatterABC):
             return f'\n  {self.url(repo_path, issue)}: {msg}\n'
 
 
-def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], users:set, formatter: FormatterABC,
+def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], members:set, formatter: FormatterABC,
                   days: int=7, stale: int=30, show_all: bool=False):
     repo_path = f'https://github.com/{owner}/{repo}'
     
@@ -512,7 +512,7 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], users:
                 continue            
             if issue.closed_at:
                 continue
-            elif issue.created_by in users:
+            elif issue.created_by in members:
                 continue
             elif issue.last_team_response_at and issue.last_response_at == issue.last_team_response_at:
                 diff = date_diff(now, issue.last_response_at).days
@@ -534,23 +534,31 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], users:
 
 
 
-def report(owner, repo, token, out=None, verbose=False, days=1, stale=30, extra_users=None, bug_label='bug', \
+def report(owner, repo, token, out=None, verbose=False, days=1, stale=30, extra_members=None, bug_label='bug', \
            xrange=180, chunk=25, show_all=False):
 
     fmt = out[out.rfind('.'):] if out is not None else '.txt'
     formatter = HTMLFormatter() if fmt == '.html' else \
                 (MarkdownFormatter() if fmt == '.md' else TextFormatter())
-    # Get the users in the team
-    users = get_users_for_repo(owner, repo, token)
-    if extra_users:
-        for u in extra_users.split(','):
-            if u:
-                users.add(u)
 
-    issues = get_issues(owner, repo, token, users, chunk=chunk, bug_label=bug_label, verbose=verbose)
+    # Get the members in the team
+    if extra_members and extra_members.startswith('+'):
+        extra_members = extra_members[1:]
+        members = set()
+    else:
+        members = get_members(owner, repo, token)
+        if verbose:
+            print(f'Team Members: {",".join(list(members))}')
+
+    if extra_members:
+        for u in extra_members.split(','):
+            if u:
+                members.add(u)
+
+    issues = get_issues(owner, repo, token, members, chunk=chunk, bug_label=bug_label, verbose=verbose)
     now = datetime.now()
 
-    report = find_revisits(now, owner, repo, issues.values(), users=users, formatter=formatter, days=days,
+    report = find_revisits(now, owner, repo, issues.values(), members=members, formatter=formatter, days=days,
                                stale=stale, show_all=show_all)
 
     if fmt == '.html':

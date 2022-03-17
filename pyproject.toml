@@ -29,3 +29,10 @@ Source = "https://github.com/gramster/ghreport"
 
 [project.scripts]
 ghreport = "ghreport:main"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
