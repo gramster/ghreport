@@ -381,6 +381,8 @@ class FormatterABC(abc.ABC):
     def info(self, msg: str) -> str: ...
     @abc.abstractmethod
     def line(self, star: bool, repo_path: str, issue: Issue, msg: str) -> str: ...
+    @abc.abstractmethod
+    def hline(self) -> str: ...
 
 
 class HTMLFormatter(FormatterABC):
@@ -397,6 +399,9 @@ class HTMLFormatter(FormatterABC):
     def line(self, star: bool, repo_path: str, issue: Issue, msg: str) -> str:
         return f'<div>{"*" if star else " "} {self.url(repo_path, issue)}: {msg}</div>\n'
 
+    def hline(self) -> str:
+        return '\n<hr>\n'
+
 
 class TextFormatter(FormatterABC):
     def url(self, repo_path: str, issue: Issue) -> str:
@@ -410,6 +415,9 @@ class TextFormatter(FormatterABC):
 
     def line(self, star: bool, repo_path: str, issue: Issue, msg: str) -> str:
         return f'{"*" if star else " "} {self.url(repo_path, issue)}: {msg}\n'
+
+    def hline(self) -> str:
+        return '================================================================='
 
 
 class MarkdownFormatter(FormatterABC):
@@ -429,6 +437,9 @@ class MarkdownFormatter(FormatterABC):
             return f'\n\* {self.url(repo_path, issue)}: {msg}\n'
         else:
             return f'\n  {self.url(repo_path, issue)}: {msg}\n'
+
+    def hline(self) -> str:
+        return '\n---\n'
 
 
 def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], members:set, formatter: FormatterABC,
@@ -528,7 +539,7 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], member
                     report += formatter.line(star, repo_path, issue, 
                                   f'team response was last response and no others in {diff} days')
         if bug_flag:
-            report += formatter.info('=================================================================')
+            report += formatter.hline()
 
     return report
 

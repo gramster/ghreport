@@ -28,4 +28,8 @@ For an example report, see https://github.com/gramster/ghreport/blob/main/exampl
 0.5 Added markdown support
 
 0.6 Remove hardcoded owner from query
+
+0.8 Better team option
+
+0.9 Add proper markdown line rule
  
