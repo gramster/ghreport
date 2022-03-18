@@ -27,15 +27,16 @@ or if the file name ends in '.md', in which case Markdown will be used (no chart
 The file name specified with -o will be formatted using strftime so you can
 add dynamic elements based on the current date.
 
-If -t is used and the list of users starts with '+', then we will skip retrieving the user
-list from GitHub. The latter requires admin read privileges for the token, so this is a 
-way to run ghreport with lower privileged tokens.
+If -t is used and the list of users starts with '+', then we retrieve the user
+list from GitHub, and then add the specified users to that list. Getting the list
+from GitHub requires admin read privileges for the token. Without '+', we use just
+the users specified on the command line to define the team members.
 
 You normally should not need to use the num argument unless you are experiencing
 timeouts from the GitHub API; in this case you may want to try a lower value.
 """
 
-__version__ = '0.12'
+__version__ = '0.13'
 
 from docopt import docopt, DocoptExit
 from .ghreport import report

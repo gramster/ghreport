@@ -552,15 +552,13 @@ def report(owner, repo, token, out=None, verbose=False, days=1, stale=30, extra_
                 (MarkdownFormatter() if fmt == '.md' else TextFormatter())
 
     # Get the members in the team
-    if extra_members and extra_members.startswith('+'):
-        extra_members = extra_members[1:]
-        members = set()
-    else:
-        members = get_members(owner, repo, token)
-        if verbose:
-            print(f'Team Members: {",".join(list(members))}')
-
+    members = set()
     if extra_members:
+        if extra_members.startswith('+'):
+            members = get_members(owner, repo, token)
+            if verbose:
+                print(f'Team Members (from GitHub): {",".join(list(members))}')
+            extra_members = extra_members[1:]  # Strip +
         for u in extra_members.split(','):
             if u:
                 members.add(u)
