@@ -72,7 +72,7 @@ query ($owner: String!, $repo: String!, $cursor: String, $chunk: Int) {
     resetAt
   }
   repository(owner: $owner, name: $repo) {
-    issues(first: $chunk, after: $cursor) {
+    issues(states: [OPEN], first: $chunk, after: $cursor) {
       totalCount
       pageInfo {
         endCursor
