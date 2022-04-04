@@ -37,4 +37,6 @@ For an example report, see https://github.com/gramster/ghreport/blob/main/exampl
 
 0.12 Fix typo
 
+0.14 Only fetch open issues
+
  
