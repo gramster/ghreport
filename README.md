@@ -39,4 +39,4 @@ For an example report, see https://github.com/gramster/ghreport/blob/main/exampl
 
 0.14 Only fetch open issues
 
- 
+0.15 Fix non-async sleep.

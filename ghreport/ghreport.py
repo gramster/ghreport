@@ -271,7 +271,7 @@ async def get_raw_issues(owner:str, repo:str, token:str, chunk:int = 25, verbose
                 # Pre-emptively rate limit
                 sleep_time = date_diff(reset_at, datetime.now()).seconds + 1
                 print(f'Fetched {count} issues of {data["totalCount"]} but need to wait {sleep_time} seconds')
-                time.sleep(sleep_time)               
+                await asyncio.sleep(sleep_time)               
  
     if verbose:
         print(f'GitHub API stats for {repo}:')
