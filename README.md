@@ -13,7 +13,7 @@ python -m pip install ghreport
 
 Use `ghreport -h` for help.
 
-For an example report, see https://github.com/gramster/ghreport/blob/main/example.md
+For an example report, see https://github.com/gramster/ghreport/blob/main/example.md or you can see these in an automated form for my teams at **https://github.com/gramster/python-reports**
 
 ## Version History
 
