@@ -1,6 +1,6 @@
 ## Building
 
-1) Install flit of needed: pip -m install flit
+1) Install flit of needed: python -m pip install flit
 2) Run 'flit install'
 
 You should then have a local copy available as 'ghreport'.
