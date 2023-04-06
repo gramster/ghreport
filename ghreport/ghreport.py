@@ -1,9 +1,10 @@
 import abc
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from json import dumps
 import time
-from typing import List, Optional
 import asyncio
+from typing import Generator, Iterable, Sequence
 from github import Github
 import pytz
 import httpx
@@ -13,6 +14,7 @@ from bokeh.plotting import figure, output_file, show, save
 from bokeh.embed import components
 from bokeh.models import HoverTool, Range1d, Title
 from bokeh.io import output_notebook
+import pandas as pd
 
 
 plt.style.use('bmh')
@@ -31,17 +33,17 @@ class Issue:
     number: int
     title: str
     created_by: str
+    closed_by: str|None
     created_at: datetime 
-    closed_at: datetime
-    first_team_response_at: datetime # first comment by team
-    last_team_response_at: datetime # last comment by team   
-    last_op_response_at: datetime # last comment by OP   
-    last_response_at: datetime # last comment by anyone         
-    events: List[Event]
-    is_bug: bool
+    closed_at: datetime | None
+    first_team_response_at: datetime | None # first comment by team
+    last_team_response_at: datetime | None # last comment by team   
+    last_op_response_at: datetime | None # last comment by OP   
+    last_response_at: datetime | None # last comment by anyone         
+    events: list[Event]
 
 
-def get_members(owner:str, repo:str, token:str) -> set:
+def get_members(owner:str, repo:str, token:str) -> set[str]:
     """ 
     Get the team members for a repo that have push or admin rights. This is not
     public so if you are not in such a team (probably with admin rights) this will fail.
@@ -64,15 +66,16 @@ def get_members(owner:str, repo:str, token:str) -> set:
     return rtn
 
 
+# Arguments with ! are required.
 issues_query = """
-query ($owner: String!, $repo: String!, $cursor: String, $chunk: Int) {
+query ($owner: String!, $repo: String!, $state: IssueState!, $cursor: String, $chunk: Int) {
   rateLimit {
     remaining
     cost
     resetAt
   }
   repository(owner: $owner, name: $repo) {
-    issues(states: [OPEN], first: $chunk, after: $cursor) {
+    issues(states: [$state], first: $chunk, after: $cursor) {
       totalCount
       pageInfo {
         endCursor
@@ -86,12 +89,21 @@ query ($owner: String!, $repo: String!, $cursor: String, $chunk: Int) {
         author {
           login
         }
+        editor {
+          login
+        }
         timelineItems(
           first: 100
-          itemTypes: [LABELED_EVENT, UNLABELED_EVENT, ISSUE_COMMENT]
+          itemTypes: [CLOSED_EVENT, LABELED_EVENT, UNLABELED_EVENT, ISSUE_COMMENT]
         ) {
           nodes {
             __typename
+            ... on ClosedEvent {
+              actor {
+                login
+              }
+              createdAt
+            }
             ... on LabeledEvent {
               label {
                 name
@@ -141,43 +153,44 @@ query ($owner: String!, $repo: String!, $cursor: String, $chunk: Int) {
 }
 """
 
+
 utc=pytz.UTC
 
 
-def utc_to_local(utc_dt):
+def utc_to_local(utc_dt: datetime) -> datetime:
     return utc_dt.replace(tzinfo=timezone.utc).astimezone(tz=None)
 
 
-def date_diff(d1, d2):
+def date_diff(d1: datetime, d2: datetime) -> timedelta:
     return utc_to_local(d1) - utc_to_local(d2)
 
 
-def get_who(obj, prop):
+def get_who(obj, prop: str, fallback: str|None = None) -> str:
     if prop in obj:
         v = obj[prop]
         if v:
             return v['login']
-    return None
+    if fallback:
+        return fallback
+    raise Exception(f'No {prop} in {obj}')
 
 
-def parse_date(datestr):
+def parse_date(datestr: str) -> datetime:
     return utc_to_local(datetime.strptime(datestr, '%Y-%m-%dT%H:%M:%SZ'))
 
 
-def format_date(d):
+def format_date(d: datetime) -> str:
     return f'{d.year}-{d.month:02d}-{d.day:02d}'
 
 
-def parse_raw_issue(issue, members, bug_label = 'bug'):
+def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
     try:
         number = issue['number']
         title = issue['title']
-        created_by = get_who(issue, 'author')
-        created_at = parse_date(issue['createdAt'])
-        closed_at = None
-        if issue['closedAt']:
-            closed_at = parse_date(issue['createdAt'])        
-
+        created_by: str = get_who(issue, 'author', 'UNKNOWN')
+        closed_by: str | None = None
+        created_at: datetime = parse_date(issue['createdAt'])
+        closed_at: datetime | None = parse_date(issue['createdAt']) if issue['closedAt'] else None
         events = []
         is_bug = False
 
@@ -191,29 +204,28 @@ def parse_raw_issue(issue, members, bug_label = 'bug'):
         for event in issue['timelineItems']['nodes']:
             typename = event['__typename']
             eventtime = parse_date(event['createdAt'])
-            if typename == 'LabeledEvent':
+            if typename == 'ClosedEvent':
+                closed_by = get_who(event, 'actor', 'UNKNOWN')
+                continue          
+            elif typename == 'LabeledEvent':
                 lbl = event['label']['name']
-                if lbl == bug_label:
-                    is_bug = True
-                who = get_who(event, 'actor')                    
+                who = get_who(event, 'actor', 'UNKNOWN')             
                 e = Event(eventtime, who, 'labeled', lbl)
             elif typename == 'UnlabeledEvent':
                 lbl = event['label']['name']
-                if lbl == bug_label:
-                    is_bug = False   
-                who = get_who(event, 'actor')                    
+                who = get_who(event, 'actor', 'UNKNOWN')                    
                 e = Event(eventtime, who, 'unlabeled', lbl)
             elif typename == 'AssignedEvent':
-                who = get_who(event, 'assignee')                
+                who = get_who(event, 'assignee', 'UNKNOWN')                
                 e = Event(eventtime, who, 'assigned', '')
             elif typename == 'UnassignedEvent':
-                who = get_who(event, 'assignee')                
+                who = get_who(event, 'assignee', 'UNKNOWN')                
                 e = Event(eventtime, who, 'unassigned', '') 
             elif typename == 'IssueComment':
                 l = event['lastEditedAt']
                 if l:
                     eventtime = parse_date(event['lastEditedAt'])
-                who = get_who(event, 'author')               
+                who = get_who(event, 'author', 'UNKNOWN')               
                 if who in members:
                     last_team_response_at = eventtime
                     if first_team_response_at is None:
@@ -229,14 +241,16 @@ def parse_raw_issue(issue, members, bug_label = 'bug'):
             events.append(e)
     except Exception as e:
         print(f'Failed to parse issue\n{issue}: {e}')
+        return None
                                          
-    return Issue(number, title, created_by, created_at, closed_at,        
+    return Issue(number, title, created_by, closed_by, created_at, closed_at,        
                  first_team_response_at, last_team_response_at,
                  last_op_response_at, last_response_at,
-                 events, is_bug)   
+                 events)
 
 
-async def get_raw_issues(owner:str, repo:str, token:str, chunk:int = 25, verbose:bool = False):
+async def get_raw_issues(query: str, owner:str, repo:str, token:str, state:str = 'OPEN', \
+                         chunk:int = 25, verbose:bool = False) -> list[dict]:
     cursor = None
     issues = []
     count = 0
@@ -249,7 +263,7 @@ async def get_raw_issues(owner:str, repo:str, token:str, chunk:int = 25, verbose
                                        oauth_token=token)
         reset_at = None
         while True:
-            result = await gh.graphql(issues_query, owner=owner, repo=repo, cursor=cursor, chunk=chunk)
+            result = await gh.graphql(query, owner=owner, repo=repo, state=state, cursor=cursor, chunk=chunk)
             limit = result['rateLimit']                
             reset_at = parse_date(limit['resetAt'])                
 
@@ -282,45 +296,61 @@ async def get_raw_issues(owner:str, repo:str, token:str, chunk:int = 25, verbose
     return issues
 
 
-def get_issues(owner:str, repo:str, token:str, members:set, chunk:int = 25, raw_issues=None,
-               bug_label:str = 'bug', verbose:bool = False):
+def get_issues(owner:str, repo:str, token:str, members:set[str], state: str='OPEN', \
+               chunk:int = 25, raw_issues: list[dict[str,str]]|None=None, \
+               verbose:bool = False) -> dict[str, Issue]:
     if raw_issues is None:
         # non-Jupyter case
         # Next line won't work in Jupyter; instead we have to get raw issues in 
         # one cell and then do this in another cell        
-        raw_issues = asyncio.run(get_raw_issues(owner, repo, token, chunk=chunk, verbose=verbose)) 
+        raw_issues = asyncio.run(get_raw_issues(issues_query, owner, repo, token, state=state, chunk=chunk, verbose=verbose)) 
     issues = {}    
     for issue in raw_issues:
-        issues[issue['number']] = parse_raw_issue(issue, members, bug_label=bug_label)
+        parsed_issue = parse_raw_issue(issue, members)
+        if parsed_issue:
+            issues[issue['number']] = parsed_issue
     return issues
 
 
-def filter_issues(issues:List[Issue], when:datetime,
-                  must_include_labels:List[str], must_exclude_labels:Optional[List[str]]=None):
+def filter_issues(issues: Iterable[Issue], must_include_labels:list[str]|None=None, must_exclude_labels:list[str]|None=None,
+                  must_be_created_by: set[str]|None=None, must_not_be_created_by: set[str]|None = None,
+                  when:datetime|None=None) -> Generator[Issue, None, None]:
+    """
+    Get issues that were open at the given time and have (or don't have) the given labels.
+    """
     for i in issues:
-        created_at = utc_to_local(i.created_at)
-        if created_at > when:
+        if must_be_created_by and i.created_by not in must_be_created_by:
             continue
-
-        if i.closed_at is not None:
-            closed_at = utc_to_local(i.closed_at)            
-            if closed_at < when:
+        if must_not_be_created_by and i.created_by in must_not_be_created_by:
+            continue
+        if when:
+            created_at = utc_to_local(i.created_at)
+            if created_at > when:
                 continue
+
+            if i.closed_at is not None:
+                closed_at = utc_to_local(i.closed_at)            
+                if closed_at < when:
+                    continue
                 
         labels = set()
         for e in i.events:
-            if e.when > when:
+            if when and e.when > when:
                 break
             if e.event == 'labeled':
                 labels.add(e.arg)
             elif e.event == 'unlabeled' and e.arg in labels:
                 labels.remove(e.arg)
         match = True
-        for l in must_include_labels:
-            if l not in labels:
+        if must_include_labels:
+            if not labels:
                 match = False
-                break
-        if must_exclude_labels:
+            else:
+                for l in must_include_labels:
+                    if l not in labels:
+                        match = False
+                        break
+        if must_exclude_labels and labels:
             for l in must_exclude_labels:
                 if l in labels:
                     match = False
@@ -355,15 +385,15 @@ def plot_line(data, title:str, x_title:str, y_title:str, x_axis_type=None, width
     return p
     
     
-def plot_bug_rate(start:datetime, end:datetime, issues:List[Issue], who:str,
-                  must_include_labels:List[str], must_exclude_labels:Optional[List[str]]=None, interval=7):
+def plot_bug_rate(start:datetime, end:datetime, issues:list[Issue], who:str,
+                  must_include_labels:list[str], must_exclude_labels:list[str]|None=None, interval=7):
     counts = []
     dates = []
     counts = {}
     last = None
     while start < end:
         start_local = utc_to_local(start)
-        l = filter_issues(issues, start_local, must_include_labels, must_exclude_labels)
+        l = filter_issues(issues, must_include_labels, must_exclude_labels, when=start_local)
         count = len(list(l))
         counts[start] = count
         start += timedelta(days=interval)
@@ -434,7 +464,7 @@ class MarkdownFormatter(FormatterABC):
 
     def line(self, star: bool, repo_path: str, issue: Issue, msg: str) -> str:
         if star:
-            return f'\n\* {self.url(repo_path, issue)}: {msg}\n'
+            return f'\n\\* {self.url(repo_path, issue)}: {msg}\n'
         else:
             return f'\n  {self.url(repo_path, issue)}: {msg}\n'
 
@@ -442,8 +472,13 @@ class MarkdownFormatter(FormatterABC):
         return '\n---\n'
 
 
-def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], members:set, formatter: FormatterABC,
-                  days: int=7, stale: int=30, show_all: bool=False):
+def get_subset(issues:list[Issue], members: set[str], bug_flag: bool, bug_label: str = 'bug') -> Generator[Issue, None, None]:
+    return filter_issues(issues, must_include_labels=[bug_label], must_not_be_created_by=members) if bug_flag \
+            else filter_issues(issues, must_exclude_labels=[bug_label], must_not_be_created_by=members)
+
+
+def find_revisits(now: datetime, owner:str, repo:str, issues:list[Issue], members:set[str], formatter: FormatterABC,
+                  bug_label: str = 'bug', days: int=7, stale: int=30, show_all: bool=False):
     repo_path = f'https://github.com/{owner}/{repo}'
     
     report = formatter.heading(1, f'GITHUB ISSUES REPORT FOR {owner}/{repo}')
@@ -458,9 +493,7 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], member
         top_title = formatter.heading(2, f'FOR ISSUES THAT ARE{"" if bug_flag else " NOT"} MARKED AS BUGS:')
         title_done = False
         now = datetime.now()
-        for issue in issues:
-            if issue.is_bug != bug_flag or issue.created_by in members:
-                continue
+        for issue in get_subset(issues, members, bug_flag, bug_label):
             # has the OP responded after a team member?
             if not issue.closed_at and not issue.last_team_response_at:
                 diff = date_diff(now, issue.created_at).days
@@ -476,9 +509,7 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], member
                                   f'needs an initial team response ({diff} days old)')
 
         title_done = False
-        for issue in issues:
-            if issue.is_bug != bug_flag or issue.created_by in members:
-                continue            
+        for issue in get_subset(issues, members, bug_flag, bug_label):        
             # has the OP responded after a team member?
             if issue.closed_at or not issue.last_team_response_at or issue.number in shown:
                 continue
@@ -499,10 +530,11 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], member
         title_done = False
         # TODO: if we get this running daily, we should make it so it only shows new instances that
         # weren't reported before. For now we asterisk those.
-        for issue in issues:
-            if issue.is_bug != bug_flag or issue.closed_at or issue.number in shown:
+        for issue in get_subset(issues, members, bug_flag, bug_label):
+            if issue.closed_at or issue.number in shown:
                 continue
-            elif issue.last_team_response_at and issue.last_response_at > issue.last_team_response_at:
+            elif issue.last_response_at is not None and issue.last_team_response_at is not None and \
+                issue.last_response_at > issue.last_team_response_at:
                 if issue.last_response_at > issue.last_team_response_at:
                     other_days = date_diff(now, issue.last_response_at).days 
                     team_days = date_diff(now, issue.last_team_response_at).days 
@@ -520,11 +552,11 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], member
 
 
         title_done = False
-        for issue in issues:
-            if issue.is_bug != bug_flag or issue.closed_at or issue.number in shown or issue.created_by in members:
+        for issue in get_subset(issues, members, bug_flag, bug_label):
+            if issue.closed_at or issue.number in shown:
                 continue
             elif issue.last_team_response_at and issue.last_response_at == issue.last_team_response_at:
-                diff = date_diff(now, issue.last_response_at).days
+                diff = date_diff(now, issue.last_response_at).days # type: ignore
                 if diff < stale:
                     continue
                 star = diff < (stale+days)
@@ -543,40 +575,152 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:List[Issue], member
     return report
 
 
-
-def report(owner, repo, token, out=None, verbose=False, days=1, stale=30, extra_members=None, bug_label='bug', \
-           xrange=180, chunk=25, show_all=False):
-
-    fmt = out[out.rfind('.'):] if out is not None else '.txt'
-    formatter = HTMLFormatter() if fmt == '.html' else \
-                (MarkdownFormatter() if fmt == '.md' else TextFormatter())
-
-    # Get the members in the team
+def get_team_members(org: str, repo: str, token: str, extra_members: str|None, verbose: bool) -> set[str]:
     members = set()
     if extra_members:
         if extra_members.startswith('+'):
-            members = get_members(owner, repo, token)
+            members = get_members(org, repo, token)
             if verbose:
                 print(f'Team Members (from GitHub): {",".join(list(members))}')
-            extra_members = extra_members[1:]  # Strip +
-        for u in extra_members.split(','):
-            if u:
-                members.add(u)
+            extra_members = extra_members[1:]
+        members.update(extra_members.split(','))
+    else:
+        members = get_members(org, repo, token)
+        if verbose:
+            print(f'Team Members (from GitHub): {",".join(list(members))}')
+    return members
 
-    issues = get_issues(owner, repo, token, members, chunk=chunk, bug_label=bug_label, verbose=verbose)
+
+def output_result(out: str|None, result: str, now: datetime):
+    if out is not None:
+        out = now.strftime(out)
+        with open(out, 'w') as f:
+            f.write(result)
+    else:
+        print(result)
+
+
+def make_issue_query(org: str, repo: str, issues: list[int]) -> str:
+    query = f"""
+{{
+  repository(name: "{repo}", owner: "{org}") {{
+"""
+    for i, num in enumerate(issues):
+        query += f"""
+    issue{i}: issue(number: {num}) {{
+        title
+        body
+        comments(
+          first: 5
+        ) {{
+          nodes {{
+            author {{
+              login
+            }}
+            body         
+          }}
+        }}
+    }}
+"""
+    query += """
+    }
+}
+"""
+    return query
+
+
+def get_training_candidates(org: str, repo: str, token: str, members: set[str], exclude_labels: list[str],
+                            verbose:bool = False, chunk: int=25) -> list[int]:
+    # Get closed issues that are not marked as bugs or feature requests or needing info and were not
+    # created by team members.
+    issues = get_issues(org, repo, token, members, state='CLOSED', \
+                        chunk=chunk, verbose=verbose)
+    candidates = []
+    for issue in filter_issues(issues.values(), must_exclude_labels=exclude_labels,
+                               must_not_be_created_by=members):
+        # Restrict further to issues which have only one response by team members.
+        try:
+            if len([e for e in issue.events if e.actor in members]) != 1:
+                continue
+        except:
+            continue
+        candidates.append(issue.number)
+    return candidates
+
+
+async def get_training_details(candidates: list[int], org: str, repo: str, 
+                               token: str, members: set[str]) -> list[tuple[str,str]]:
+    results = []
+    dropped = 0
+    async with httpx.AsyncClient() as client:
+        gh = gidgethub.httpx.GitHubAPI(client, org, oauth_token=token)
+        while candidates:
+            group = candidates[:10]
+            candidates = candidates[10:]
+            query = make_issue_query(org, repo, group)
+            raw_issues = await gh.graphql(query)                                  
+            data = raw_issues['repository']
+            for i in range(10):
+                key = f'issue{i}'
+                if key not in data:
+                    break
+                issue = data[key]
+                if issue is None:
+                    continue
+                # If the issue body has embedded images, we can't use it as training data.
+                if issue['body'].find('![image]') >= 0:
+                    dropped += 1
+                    continue
+                # Find the first comment by a team member.
+                team_comment = None
+                for comment in issue['comments']['nodes']:
+                    if comment['author']['login'] in members:
+                        team_comment = comment['body']
+                        break
+                if team_comment is None:
+                    continue
+
+                results.append((f'{issue["title"]}\n\n{issue["body"]}', team_comment))
+
+    print(f'Dropped {dropped} issues with embedded images')
+    return results
+
+
+def get_training(org: str, repo: str, token: str, out: str|None=None, verbose: bool = False, \
+                extra_members: str|None = None, 
+                exclude_labels: list[str]|tuple[str,...] = ('bug', 'enhancement', 'needs-info'), chunk: int=25) -> None:
+    members = get_team_members(org, repo, token, extra_members, verbose)
+    candidates = get_training_candidates(org, repo, token, members, exclude_labels=list(exclude_labels), 
+                                         verbose=verbose, chunk=chunk)
+    results = asyncio.run(get_training_details(candidates, org, repo, token, members))
+    print(f'Created {len(results)} training examples')
+    result = pd.DataFrame(results, columns=['prompt', 'response']).to_json(orient='records')
     now = datetime.now()
+    output_result(out, result, now)
 
-    report = find_revisits(now, owner, repo, issues.values(), members=members, formatter=formatter, days=days,
-                               stale=stale, show_all=show_all)
 
+def report(org: str, repo: str, token: str, out: str|None=None, verbose: bool=False, days: int=1, stale: int=30, \
+           extra_members: str|None=None, bug_label: str ='bug', \
+           xrange: int=180, chunk: int=25, show_all: bool=False) -> None:
+    # We don't include label params for feature request/needs info because we don't use them
+    # in the report right now, although they might be useful in the future.
+    fmt = out[out.rfind('.'):] if out is not None else '.txt'
+    formatter = HTMLFormatter() if fmt == '.html' else \
+                (MarkdownFormatter() if fmt == '.md' else TextFormatter())
+    members = get_team_members(org, repo, token, extra_members, verbose)
+    issues = get_issues(org, repo, token, members, state='OPEN', \
+                        chunk=chunk, verbose=verbose)   
+    now = datetime.now()
+    report = find_revisits(now, org, repo, list(issues.values()), members=members, bug_label=bug_label,
+                           formatter=formatter, days=days, stale=stale, show_all=show_all)
     if fmt == '.html':
-        script, chartdiv = plot_bug_rate(now-timedelta(days=xrange), now, issues.values(),
+        script, chartdiv = plot_bug_rate(now-timedelta(days=xrange), now, list(issues.values()),
                                repo, [bug_label], interval=1)
         result = f"""<!DOCTYPE html>
 <html lang="en">
     <head>
         <meta charset="utf-8">
-        <title>Repo report for {owner}/{repo} on {format_date(now)}</title>
+        <title>Repo report for {org}/{repo} on {format_date(now)}</title>
         <script src="https://cdn.bokeh.org/bokeh/release/bokeh-2.4.2.min.js"></script>
         {script}
     </head>
@@ -589,11 +733,6 @@ def report(owner, repo, token, out=None, verbose=False, days=1, stale=30, extra_
 </html>"""
     else:
         result = report
-    if out is not None:
-        out = now.strftime(out)
-        with open(out, 'w') as f:
-            f.write(result)
-    else:
-        print(result)
 
+    output_result(out, result, now)
 
