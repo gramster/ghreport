@@ -15,7 +15,7 @@ from bokeh.models import HoverTool, Range1d, Title
 from bokeh.io import output_notebook
 
 
-plt.style.use('seaborn-whitegrid')
+plt.style.use('whitegrid')
 
 
 @dataclass
