@@ -15,7 +15,7 @@ from bokeh.models import HoverTool, Range1d, Title
 from bokeh.io import output_notebook
 
 
-plt.style.use('whitegrid')
+plt.style.use('bmh')
 
 
 @dataclass
