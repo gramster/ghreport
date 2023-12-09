@@ -699,7 +699,7 @@ def get_training(org: str, repo: str, token: str, out: str|None=None, verbose: b
     output_result(out, result, now)
 
 
-def report(org: str, repo: str, token: str, out: str|None=None, verbose: bool=False, days: int=1, stale: int=30, \
+def create_report(org: str, repo: str, token: str, out: str|None=None, verbose: bool=False, days: int=1, stale: int=30, \
            extra_members: str|None=None, bug_label: str ='bug', \
            xrange: int=180, chunk: int=25, show_all: bool=False) -> None:
     # We don't include label params for feature request/needs info because we don't use them
