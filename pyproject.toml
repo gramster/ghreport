@@ -9,16 +9,16 @@ readme = "README.md"
 license = {file = "LICENSE"}
 dynamic = ["version", "description"]
 dependencies = [
-    "flit_core >=3.7.1",
+    "flit_core ==3.9.0",
     "numpy == 1.26.4",
-    "click",
-    "pygithub",
-    "gidgethub",
-    "httpx",
-    "pytz",
+    "click==8.1.7",
+    "pygithub==2.3.0",
+    "gidgethub==5.3.0",
+    "httpx==0.27.0",
+    "pytz==2024.1",
     "bokeh == 2.4.2",
-    "matplotlib == 3.7.4",
-    "seaborn",
+    "matplotlib == 3.9.0",
+    "seaborn==0.13.2",
 ]
 classifiers = ["Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
