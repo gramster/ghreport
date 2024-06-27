@@ -10,13 +10,14 @@ license = {file = "LICENSE"}
 dynamic = ["version", "description"]
 dependencies = [
     "flit_core >=3.7.1",
+    "numpy == 1.26.4",
     "click",
     "pygithub",
     "gidgethub",
     "httpx",
     "pytz",
     "bokeh == 2.4.2",
-    "matplotlib",
+    "matplotlib == 3.7.4",
     "seaborn",
 ]
 classifiers = ["Intended Audience :: Developers",
