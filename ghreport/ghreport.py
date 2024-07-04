@@ -403,6 +403,9 @@ def plot_bug_rate(start:datetime, end:datetime, issues:list[Issue], who:str,
 
 
 class FormatterABC(abc.ABC):
+    def __init__(self, as_table: bool):
+        self.as_table = as_table
+
     @abc.abstractmethod
     def url(self, repo_path: str, issue: Issue) -> str: ...
     @abc.abstractmethod
@@ -410,12 +413,26 @@ class FormatterABC(abc.ABC):
     @abc.abstractmethod
     def info(self, msg: str) -> str: ...
     @abc.abstractmethod
-    def line(self, star: bool, repo_path: str, issue: Issue, msg: str) -> str: ...
+    def line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str: ...
     @abc.abstractmethod
     def hline(self) -> str: ...
+    @abc.abstractmethod
+    def end_section(self) -> str: ...    
 
+    def day_message(self, team=None, op=None, threep=None) -> str:
+        rtn = '('
+        if team is not None:
+            rtn += f'TM:{team}, '
+        if op is not None:
+            rtn += f'OP:{op}, '
+        if threep is not None:
+            return f'3P:{threep}, '
+        return rtn[:-2] + ')'
 
 class HTMLFormatter(FormatterABC):
+    def __init__(self, as_table: bool):
+        super().__init__(as_table)
+
     def url(self, repo_path: str, issue: Issue) -> str:
         title = issue.title.replace('"', "&quot;")
         return f'<a title="{title}" href="{repo_path}/issues/{issue.number}">{issue.number}</a>'
@@ -424,16 +441,31 @@ class HTMLFormatter(FormatterABC):
         return f'<div>{msg}</div>\n'
 
     def heading(self, level: int, msg: str) -> str:
-        return f'<h{level}>{msg}</h{level}>\n'
+        rtn = f'<h{level}>{msg}</h{level}>\n'
+        if self.as_table:
+            rtn += '<table><tr><th>Days</th><th>URL</th><th>Title</th></tr>\n'
+        return rtn
 
-    def line(self, star: bool, repo_path: str, issue: Issue, msg: str) -> str:
-        return f'<div>{"*" if star else " "} {self.url(repo_path, issue)}: {msg}</div>\n'
+
+    def line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
+        days = self.day_message(team=team, op=op, threep=threep)
+        if self.as_table:
+            days = days[1:-1]  # remove ()
+            return f'<tr><td>{"*" if star else " "}</td><td>{days}</td><td>{self.url(repo_path, issue)}</td><td>{issue.title}</td></tr>\n'
+        else:
+            return f'<div>{"*" if star else " "} {days} {self.url(repo_path, issue)}: {issue.title}</div>\n'
 
     def hline(self) -> str:
         return '\n<hr>\n'
 
+    def end_section(self) -> str:
+        return '</table>\n' if self.as_table else ''
+
 
 class TextFormatter(FormatterABC):
+    def __init__(self, as_table: bool):
+        super().__init__(as_table)
+
     def url(self, repo_path: str, issue: Issue) -> str:
         return f'{repo_path}/issues/{issue.number}'
 
@@ -443,14 +475,21 @@ class TextFormatter(FormatterABC):
     def heading(self, level: int, msg: str) -> str:
         return f'\n{msg}\n\n'
 
-    def line(self, star: bool, repo_path: str, issue: Issue, msg: str) -> str:
-        return f'{"*" if star else " "} {self.url(repo_path, issue)}: {msg}\n'
+    def line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
+        days = self.day_message(team=team, op=op, threep=threep)        
+        return f'{"*" if star else " "} {days} {self.url(repo_path, issue)}: {issue.title}\n'
 
     def hline(self) -> str:
         return '================================================================='
 
+    def end_section(self) -> str:
+        return ''
+
 
 class MarkdownFormatter(FormatterABC):
+    def __init__(self, as_table: bool):
+        super().__init__(as_table)
+
     def url(self, repo_path: str, issue: Issue) -> str:
         link = f'{repo_path}/issues/{issue.number}'
         title = issue.title.replace('"', '&quot;')
@@ -460,16 +499,28 @@ class MarkdownFormatter(FormatterABC):
         return f'\n{msg}\n\n'
 
     def heading(self, level: int, msg: str) -> str:
-        return f'\n{"#"*level} {msg}\n\n'
+        rtn = f'\n{"#"*level} {msg}\n\n'
+        if self.as_table:
+            rtn += '| Days | Issue | Title |\n| --- | --- | --- |\n'
+        return rtn
 
-    def line(self, star: bool, repo_path: str, issue: Issue, msg: str) -> str:
+    def line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
+        days = self.day_message(team=team, op=op, threep=threep)
+        sep = ''
+        if self.as_table:       
+            sep = ' |'
+            days = days[1:-1]  # remove ()
+
         if star:
-            return f'\n\\* {self.url(repo_path, issue)}: {msg}\n'
+            return f'\n{sep} \\* {days} {sep}{self.url(repo_path, issue)} {sep if sep else ":"}{issue.title}{sep}\n'
         else:
-            return f'\n  {self.url(repo_path, issue)}: {msg}\n'
+            return f'\n{sep}  {days} {sep}{self.url(repo_path, issue)}{sep if sep else ":"} {issue.title}{sep}\n'
 
     def hline(self) -> str:
         return '\n---\n'
+
+    def end_section(self) -> str:
+        return '\n'
 
 
 def get_subset(issues:list[Issue], members: set[str], bug_flag: bool, bug_label: str = 'bug') -> Generator[Issue, None, None]:
@@ -505,10 +556,11 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:list[Issue], member
                         report += formatter.heading(3, f'Issues in {repo} that need a response from team:')
                         title_done = True
                     shown.add(issue.number)
-                    report += formatter.line(star, repo_path, issue,
-                                  f'needs an initial team response ({diff} days old)')
+                    report += formatter.line(star, repo_path, issue, op=diff)
+        if title_done:
+            report += formatter.end_section()
+            title_done = False
 
-        title_done = False
         for issue in get_subset(issues, members, bug_flag, bug_label):        
             # has the OP responded after a team member?
             if issue.closed_at or not issue.last_team_response_at or issue.number in shown:
@@ -524,10 +576,12 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:list[Issue], member
                         report += formatter.heading(3, f'Issues in {repo} that have comments from OP after last team response:')
                         title_done = True 
                     shown.add(issue.number)
-                    report += formatter.line(star, repo_path, issue,
-                                  f'OP responded {op_days} days ago but team last responded {team_days} days ago')
+                    report += formatter.line(star, repo_path, issue, op=op_days, team=team_days)
 
-        title_done = False
+        if title_done:
+            report += formatter.end_section()
+            title_done = False
+
         # TODO: if we get this running daily, we should make it so it only shows new instances that
         # weren't reported before. For now we asterisk those.
         for issue in get_subset(issues, members, bug_flag, bug_label):
@@ -547,11 +601,12 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:list[Issue], member
                             report += formatter.heading(3, f'Issues in {repo} that have comments from 3rd party after last team response:')
                             title_done = True          
                         shown.add(issue.number)
-                        report += formatter.line(star, repo_path, issue,
-                                      f'3rd party responded {other_days} days ago but team last responded {team_days} days ago')
+                        report += formatter.line(star, repo_path, issue, threep=other_days, team=team_days)
 
+        if title_done:
+            report += formatter.end_section()
+            title_done = False
 
-        title_done = False
         for issue in get_subset(issues, members, bug_flag, bug_label):
             if issue.closed_at or issue.number in shown:
                 continue
@@ -567,8 +622,12 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:list[Issue], member
                         report += formatter.heading(3, f'Issues in {repo} that have no external responses since team response in {stale}+ days:')
                         title_done = True            
                     shown.add(issue.number)
-                    report += formatter.line(star, repo_path, issue, 
-                                  f'team response was last response and no others in {diff} days')
+                    report += formatter.line(star, repo_path, issue, team=diff)
+
+        if title_done:
+            report += formatter.end_section()
+            title_done = False
+
         if bug_flag:
             report += formatter.hline()
 
@@ -699,14 +758,16 @@ def get_training(org: str, repo: str, token: str, out: str|None=None, verbose: b
     output_result(out, result, now)
 
 
-def create_report(org: str, repo: str, token: str, out: str|None=None, verbose: bool=False, days: int=1, stale: int=30, \
+def create_report(org: str, repo: str, token: str, out: str|None=None, 
+           as_table:bool=False, verbose: bool=False, days: int=1, stale: int=30, \
            extra_members: str|None=None, bug_label: str ='bug', \
            xrange: int=180, chunk: int=25, show_all: bool=False) -> None:
     # We don't include label params for feature request/needs info because we don't use them
     # in the report right now, although they might be useful in the future.
     fmt = out[out.rfind('.'):] if out is not None else '.txt'
-    formatter = HTMLFormatter() if fmt == '.html' else \
-                (MarkdownFormatter() if fmt == '.md' else TextFormatter())
+    formatter = HTMLFormatter(as_table) if fmt == '.html' else \
+                (MarkdownFormatter(as_table) if fmt == '.md' else \
+                 TextFormatter(as_table))
     members = get_team_members(org, repo, token, extra_members, verbose)
     issues = get_issues(org, repo, token, members, state='OPEN', \
                         chunk=chunk, verbose=verbose)   

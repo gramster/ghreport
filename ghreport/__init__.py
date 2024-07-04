@@ -1,6 +1,6 @@
 """ghreport - Github report generator. """
 
-__version__ = '0.17'
+__version__ = '0.18'
 import click
 from .ghreport import get_training, get_training_details, create_report
 
@@ -16,6 +16,7 @@ def cli():
 @click.argument('repo')
 @click.argument('token')
 @click.option('-o', '--out', type=click.Path(), help='Write output to specified file.')
+@click.option('-T', '--table', is_flag=True, help='Output report sections as formatted tables (HTML or Markdown).')
 @click.option('-v', '--verbose', is_flag=True, help='Show extra output like stats about GitHub API usage costs.')
 @click.option('-d', '--days', default=1, type=int, help='Window size (days) for items in report as new (with "*").')
 @click.option('-a', '--all', is_flag=True, help='Show all relevant issues, not just those new in the window.')
@@ -24,7 +25,7 @@ def cli():
 @click.option('-b', '--bug', default='bug', help='The label used to identify issues that are considered bugs.')
 @click.option('-x', '--xrange', default=180, type=int, help='How many days to plot the chart for.')
 @click.option('-n', '--num', default=25, type=int, help='How many issues to fetch per API request.')
-def report(repo, token, out, verbose, days, all, stale, team, bug, xrange, num):
+def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange, num):
     """Generate a report for the given repository.
 
     For reports, output is plain text, unless -o is used and the file name ends in
@@ -44,7 +45,8 @@ def report(repo, token, out, verbose, days, all, stale, team, bug, xrange, num):
         xrange = 7
     if days < 1:
         days = 1
-    create_report(owner, repo_name, token, out, verbose, days=days, stale=stale, extra_members=team, bug_label=bug, xrange=xrange, show_all=all)
+    create_report(owner, repo_name, token, out, as_table=table, verbose=verbose, days=days, \
+                  stale=stale, extra_members=team, bug_label=bug, xrange=xrange, show_all=all)
 
 
 @cli.command()
@@ -70,7 +72,7 @@ def training(repo, token, out, verbose, team, bug, feat, info, num):
     timeouts from the GitHub API; in this case you may want to try a lower value.
     """
     owner, repo_name = repo.split('/')
-    get_training(owner, repo_name, token, out, verbose, extra_members=team, exclude_labels=[bug, feat, info])
+    get_training(owner, repo_name, token, out, verbose=verbose, extra_members=team, exclude_labels=[bug, feat, info])
 
 
 def main():
