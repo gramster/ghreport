@@ -442,7 +442,7 @@ class HTMLFormatter(FormatterABC):
 
     def heading(self, level: int, msg: str) -> str:
         rtn = f'<h{level}>{msg}</h{level}>\n'
-        if self.as_table:
+        if level == 3 and self.as_table:
             rtn += '<table><tr><th>Days</th><th>URL</th><th>Title</th></tr>\n'
         return rtn
 
@@ -500,7 +500,7 @@ class MarkdownFormatter(FormatterABC):
 
     def heading(self, level: int, msg: str) -> str:
         rtn = f'\n{"#"*level} {msg}\n\n'
-        if self.as_table:
+        if level == 3 and self.as_table:
             rtn += '| Days | Issue | Title |\n| --- | --- | --- |'
         return rtn
 
