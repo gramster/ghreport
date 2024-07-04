@@ -501,20 +501,22 @@ class MarkdownFormatter(FormatterABC):
     def heading(self, level: int, msg: str) -> str:
         rtn = f'\n{"#"*level} {msg}\n\n'
         if self.as_table:
-            rtn += '| Days | Issue | Title |\n| --- | --- | --- |\n'
+            rtn += '| Days | Issue | Title |\n| --- | --- | --- |'
         return rtn
 
     def line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
         days = self.day_message(team=team, op=op, threep=threep)
         sep = ''
+        term = '\n'
         if self.as_table:       
             sep = ' |'
+            term = ''
             days = days[1:-1]  # remove ()
 
         if star:
-            return f'\n{sep} \\* {days} {sep}{self.url(repo_path, issue)} {sep if sep else ":"}{issue.title}{sep}\n'
+            return f'\n{sep} \\* {days} {sep}{self.url(repo_path, issue)} {sep if sep else ":"}{issue.title}{sep}{term}'
         else:
-            return f'\n{sep}  {days} {sep}{self.url(repo_path, issue)}{sep if sep else ":"} {issue.title}{sep}\n'
+            return f'\n{sep}  {days} {sep}{self.url(repo_path, issue)}{sep if sep else ":"} {issue.title}{sep}{term}'
 
     def hline(self) -> str:
         return '\n---\n'
