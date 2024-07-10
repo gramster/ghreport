@@ -192,7 +192,6 @@ def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
         created_at: datetime = parse_date(issue['createdAt'])
         closed_at: datetime | None = parse_date(issue['createdAt']) if issue['closedAt'] else None
         events = []
-        is_bug = False
 
         # Treat the initial description as a response if by a team member    
         response_at = created_at if created_by in members else None
@@ -274,7 +273,7 @@ async def get_raw_issues(query: str, owner:str, repo:str, token:str, state:str =
                     issues.append(issue)  # Maybe extend is possible; playing safe
 
             if data['pageInfo']['hasNextPage']:
-                cursor = has_more = data['pageInfo']['endCursor']
+                cursor = data['pageInfo']['endCursor']
             else:
                 break
                 
@@ -418,6 +417,8 @@ class FormatterABC(abc.ABC):
     def hline(self) -> str: ...
     @abc.abstractmethod
     def end_section(self) -> str: ...    
+    @abc.abstractmethod
+    def line_separator(self) -> str: ...
 
     def day_message(self, team=None, op=None, threep=None) -> str:
         rtn = '('
@@ -443,9 +444,8 @@ class HTMLFormatter(FormatterABC):
     def heading(self, level: int, msg: str) -> str:
         rtn = f'<h{level}>{msg}</h{level}>\n'
         if level == 3 and self.as_table:
-            rtn += '<table><tr><th>Days</th><th>URL</th><th>Title</th></tr>\n'
+            rtn += '<table><tr><th>Days Ago</th><th>URL</th><th>Title</th></tr>\n'
         return rtn
-
 
     def line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
         days = self.day_message(team=team, op=op, threep=threep)
@@ -461,6 +461,8 @@ class HTMLFormatter(FormatterABC):
     def end_section(self) -> str:
         return '</table>\n' if self.as_table else ''
 
+    def line_separator(self) -> str:
+        return '<br>\n'
 
 class TextFormatter(FormatterABC):
     def __init__(self, as_table: bool):
@@ -485,7 +487,9 @@ class TextFormatter(FormatterABC):
     def end_section(self) -> str:
         return ''
 
-
+    def line_separator(self) -> str:
+        return '\n'
+    
 class MarkdownFormatter(FormatterABC):
     def __init__(self, as_table: bool):
         super().__init__(as_table)
@@ -501,7 +505,7 @@ class MarkdownFormatter(FormatterABC):
     def heading(self, level: int, msg: str) -> str:
         rtn = f'\n{"#"*level} {msg}\n\n'
         if level == 3 and self.as_table:
-            rtn += '| Days | Issue | Title |\n| --- | --- | --- |'
+            rtn += '| Days Ago | Issue | Title |\n| --- | --- | --- |'
         return rtn
 
     def line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
@@ -524,6 +528,9 @@ class MarkdownFormatter(FormatterABC):
     def end_section(self) -> str:
         return '\n'
 
+    def line_separator(self) -> str:
+        return '\n' if self.as_table else '\n\n'
+            
 
 def get_subset(issues:list[Issue], members: set[str], bug_flag: bool, bug_label: str = 'bug') -> Generator[Issue, None, None]:
     return filter_issues(issues, must_include_labels=[bug_label], must_not_be_created_by=members) if bug_flag \
@@ -760,6 +767,57 @@ def get_training(org: str, repo: str, token: str, out: str|None=None, verbose: b
     output_result(out, result, now)
 
 
+def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5):
+    """
+    Find the most common terms in the issue titles. First we remove common words and then
+    count the remaining words. We then sort them by count.
+    """
+    stopwords = ['a', 'an', 'the', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'from',
+                  'as', 'is', 'are', 'be', 'it', 'this', 'that', 'these', 'those', 'there', 'here', 'where', 
+                  'when', 'how', 'why', 'what', 'which', 'who', 'whom', 'whose', 'i', 'you', 'he', 'she', 
+                  'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them', 'my', 'mine', 'your', 'yours', 
+                  'his', 'her', 'hers', 'its', 'our', 'ours', 'their', 'theirs', 'myself', 'yourself', 
+                  'himself', 'herself', 'itself', 'ourselves', 'yourselves', 'themselves', 'all',
+                  'cannot', 'without', 'name', 'vs', 'pylance', 'python', 'show', 'add', 'support',
+                  'not', 'after', 'does', 'no', 'working', 'doesn\'t', 'can\'t', 'won\'t', 'shouldn\'t',
+                  'unable', 'visual', 'studio', 'up', 'if', 'only', 'microsoft', 'using', '-',
+                  'work', 'should', 'vscode', 'don\'t', 'offer', 'over', 'incorrect', 'inside',
+                  'being', 'could', 'go', 'showing', 'have', 'shown', 'even', 'has', 'instead',
+                  'recognized', 'issue', 'new', 'allow', 'fails', 'out', 'long', 'available', 
+                  'problem', 'get', 'until', 'can', 'like']
+    issues_with_term = {}
+    for issue in issues:
+        title = issue.title.lower()
+        for word in title.split():
+            if word in stopwords:
+                continue
+            if word in issues_with_term:
+                # Don't add issues  more than once
+                if issue not in issues_with_term[word]:
+                    issues_with_term[word].append(issue)
+            else:
+                issues_with_term[word] = [issue]                 
+
+    # Sort issues_with_term by length of list descending
+    sorted_terms = sorted(issues_with_term.items(), key=lambda x: len(x[1]), reverse=True)
+    report_sections = []
+    now = datetime.now()
+    for term, issues in sorted_terms:
+        if len(issues) < min_count:
+            break
+
+        report_sections.append(
+            formatter.heading(3, f"Issues with term '{term}'") + \
+            ''.join([(formatter.line(False, '', i, \
+                    op=date_diff(now, i.created_at).days)) for i in issues]) + \
+            formatter.line_separator()
+        )
+
+        issues_with_term[term] = len(issues)
+
+    return (formatter.line_separator() * 3).join(report_sections)
+
+
 def create_report(org: str, repo: str, token: str, out: str|None=None, 
            as_table:bool=False, verbose: bool=False, days: int=1, stale: int=30, \
            extra_members: str|None=None, bug_label: str ='bug', \
@@ -771,13 +829,15 @@ def create_report(org: str, repo: str, token: str, out: str|None=None,
                 (MarkdownFormatter(as_table) if fmt == '.md' else \
                  TextFormatter(as_table))
     members = get_team_members(org, repo, token, extra_members, verbose)
-    issues = get_issues(org, repo, token, members, state='OPEN', \
-                        chunk=chunk, verbose=verbose)   
+    issues = list(get_issues(org, repo, token, members, state='OPEN', \
+                        chunk=chunk, verbose=verbose).values())   
     now = datetime.now()
-    report = find_revisits(now, org, repo, list(issues.values()), members=members, bug_label=bug_label,
+    report = find_revisits(now, org, repo, issues, members=members, bug_label=bug_label,
                            formatter=formatter, days=days, stale=stale, show_all=show_all)
+    
+    termranks = find_top_terms(issues, formatter)
     if fmt == '.html':
-        script, chartdiv = plot_bug_rate(now-timedelta(days=xrange), now, list(issues.values()),
+        script, chartdiv = plot_bug_rate(now-timedelta(days=xrange), now, issues,
                                repo, [bug_label], interval=1)
         result = f"""<!DOCTYPE html>
 <html lang="en">
@@ -791,11 +851,14 @@ def create_report(org: str, repo: str, token: str, out: str|None=None,
     {report}
     <br>
     <br>
+    {termranks}
+    <br>
+    <br>    
     {chartdiv}
     </body>
 </html>"""
     else:
-        result = report
+        result = report + '\n\n' + termranks
 
     output_result(out, result, now)
 

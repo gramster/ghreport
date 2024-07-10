@@ -1,6 +1,6 @@
 """ghreport - Github report generator. """
 
-__version__ = '0.22'
+__version__ = '0.30'
 import click
 from .ghreport import get_training, get_training_details, create_report
 
