@@ -1,7 +1,10 @@
 import abc
+import base64
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+import io
 from json import dumps
+import os
 import time
 import asyncio
 from typing import Generator, Iterable, Sequence
@@ -10,14 +13,16 @@ import pytz
 import httpx
 import gidgethub.httpx
 import matplotlib.pyplot as plt
-from bokeh.plotting import figure, output_file, show, save
-from bokeh.embed import components
-from bokeh.models import HoverTool, Range1d, Title
-from bokeh.io import output_notebook
+#from bokeh.io import export_png
+#from bokeh.plotting import figure, output_file, show, save
+#from bokeh.embed import components
+#from bokeh.models import HoverTool, Range1d, Title
+#from bokeh.io import output_notebook
 import pandas as pd
+import seaborn as sns
 
 
-plt.style.use('bmh')
+#plt.style.use('bmh')
 
 
 @dataclass
@@ -370,22 +375,39 @@ def plot_line(data, title:str, x_title:str, y_title:str, x_axis_type=None, width
     if x_axis_type == "linear":
         x_range = [str(v) for v in x]
         
-    p = figure(tools="save", background_fill_color="#efefef", #x_range=x_range, 
-               x_axis_type=x_axis_type, toolbar_location="below")
-    p.line(x=x, y=y, color="navy")
-    p.xgrid.grid_line_color = None
-    p.ygrid.grid_line_color = "white"
-    p.grid.grid_line_width = 2
-    p.xaxis.major_label_text_font_size="12pt"
-    p.add_layout(Title(text=title, align="center"), "above")
-    p.add_layout(Title(text=x_title, align="center"), "below")
-    p.add_layout(Title(text=y_title, align="center"), "left")   
-    p.y_range = Range1d(0, int(max_y * 1.2 + 1))
-    return p
+    # Set Seaborn style
+    sns.set_theme(style="whitegrid")
+
+    # Create the plot
+    fig, ax = plt.subplots()
+
+    # Set background color
+    fig.set_facecolor('#efefef')
+    ax.set_facecolor('#efefef')
+
+    # Plot the line
+    ax.plot(x, y, color="navy")
+
+    # Customize grid lines
+    ax.grid(True, which='both', linewidth=2)
+    ax.xaxis.grid(False)  # Remove x-axis grid lines
+    ax.yaxis.grid(True, color='white')  # Set y-axis grid lines to white
+
+    # Set axis labels and title
+    ax.set_title(title, fontsize=16, pad=20)
+    ax.set_xlabel(x_title, fontsize=12, labelpad=15)
+    ax.set_ylabel(y_title, fontsize=12, labelpad=15)
+
+    # Set y-axis range
+    ax.set_ylim(0, int(max_y * 1.2 + 1))
+
+    # Adjust font size for x-axis labels
+    ax.tick_params(axis='x', labelsize=12)    
     
     
-def plot_bug_rate(start:datetime, end:datetime, issues:list[Issue], who:str,
-                  must_include_labels:list[str], must_exclude_labels:list[str]|None=None, interval=7):
+def plot_open_bugs(start:datetime, end:datetime, issues:list[Issue], who:str,
+                  must_include_labels:list[str], must_exclude_labels:list[str]|None=None, interval=7,
+                  as_md: bool = False, outdir=None) -> str:
     counts = []
     dates = []
     counts = {}
@@ -397,8 +419,26 @@ def plot_bug_rate(start:datetime, end:datetime, issues:list[Issue], who:str,
         counts[start] = count
         start += timedelta(days=interval)
         last = count
-    plot = plot_line(counts, f"Open bug count for {who}", "Date", "Count", x_axis_type="datetime", width=7)
-    return components(plot)
+    plot_line(counts, f"Open bug count for {who}", "Date", "Count", x_axis_type="datetime", width=7)
+    if False:
+        # Ideally we would follow this path and render the plot with inline
+        # data, but this doesn't work in GitHub markdown preview.
+        # Save the plot to an in-memory buffer
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
+        # Encode the image to base64
+        img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+        return f"![](data:image/png;base64,{img_base64})" if as_md else \
+                f'<img src="data:image/png;base64,{img_base64}">'
+    else:
+        # Instead we have to save the plot to file and link to it. But we don't want
+        # lots of files lying around so we just use the same name and hope for the best.
+        # If outdir is specified, create the file there, else just use the current directory.
+        dest = 'bugcount.png' if outdir is None else os.path.join(outdir, 'bugcount.png')
+        plt.savefig(dest)
+        return '![](bugcount.png)' if as_md else f'<img src="bugcount.png">'
+    return img_md
 
 
 class FormatterABC(abc.ABC):
@@ -784,7 +824,7 @@ def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5)
                   'work', 'should', 'vscode', 'don\'t', 'offer', 'over', 'incorrect', 'inside',
                   'being', 'could', 'go', 'showing', 'have', 'shown', 'even', 'has', 'instead',
                   'recognized', 'issue', 'new', 'allow', 'fails', 'out', 'long', 'available', 
-                  'problem', 'get', 'until', 'can', 'like']
+                  'problem', 'get', 'until', 'can', 'like', 'debugpy']
     issues_with_term = {}
     for issue in issues:
         title = issue.title.lower()
@@ -822,6 +862,12 @@ def create_report(org: str, repo: str, token: str, out: str|None=None,
            as_table:bool=False, verbose: bool=False, days: int=1, stale: int=30, \
            extra_members: str|None=None, bug_label: str ='bug', \
            xrange: int=180, chunk: int=25, show_all: bool=False) -> None:
+    # Make sure the folder exists for the file specified by out
+    outdir = None
+    if out is not None:
+        outdir = os.path.dirname(out)
+        if outdir and not os.path.exists(outdir):
+            os.makedirs(outdir)
     # We don't include label params for feature request/needs info because we don't use them
     # in the report right now, although they might be useful in the future.
     fmt = out[out.rfind('.'):] if out is not None else '.txt'
@@ -836,29 +882,37 @@ def create_report(org: str, repo: str, token: str, out: str|None=None,
                            formatter=formatter, days=days, stale=stale, show_all=show_all)
     
     termranks = find_top_terms(issues, formatter)
-    if fmt == '.html':
-        script, chartdiv = plot_bug_rate(now-timedelta(days=xrange), now, issues,
-                               repo, [bug_label], interval=1)
-        result = f"""<!DOCTYPE html>
+    if fmt == '.txt':
+        result = report + '\n\n' + termranks
+    else:
+        if show_all:
+            open_bugs_chart = plot_open_bugs(now-timedelta(days=xrange), now, issues,
+                               repo, [bug_label], interval=1, as_md=(fmt=='.md'),
+                               outdir=outdir)
+        else:
+            open_bugs_chart = ''
+        if fmt == '.md':
+            result = open_bugs_chart + '\n\n' + report + '\n\n' + termranks
+        else:
+            result = f"""<!DOCTYPE html>
 <html lang="en">
     <head>
         <meta charset="utf-8">
         <title>Repo report for {org}/{repo} on {format_date(now)}</title>
-        <script src="https://cdn.bokeh.org/bokeh/release/bokeh-2.4.2.min.js"></script>
-        {script}
     </head>
     <body>
+    {open_bugs_chart}
+    <br>
+    <br>    
     {report}
     <br>
     <br>
     {termranks}
-    <br>
-    <br>    
-    {chartdiv}
     </body>
 </html>"""
-    else:
-        result = report + '\n\n' + termranks
 
     output_result(out, result, now)
 
+
+
+     
