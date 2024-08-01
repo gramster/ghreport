@@ -1,6 +1,6 @@
 """ghreport - Github report generator. """
 
-__version__ = '0.51'
+__version__ = '0.52'
 import click
 from .ghreport import get_training, get_training_details, create_report
 
@@ -30,8 +30,9 @@ def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange
 
     For reports, output is plain text, unless -o is used and the file name ends in
     .html, in which case HTML with an embedded bug count chart will be written to the
-    file, or if the file name ends in '.md', in which case Markdown will be used (no
-    chart). The file name specified with -o will be formatted using strftime so you can
+    file, or if the file name ends in '.md', in which case Markdown will be used (with
+    a separate chart as GitHub doesn't support embedded charts in its previewer).
+    The file name specified with -o will be formatted using strftime so you can
     add dynamic elements based on the current date.
     
     If -t is used and the list of users starts with '+', then we retrieve the user

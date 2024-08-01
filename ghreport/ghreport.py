@@ -404,46 +404,11 @@ def plot_line(data, title:str, x_title:str, y_title:str, x_axis_type=None, width
     # Adjust font size for x-axis labels
     ax.tick_params(axis='x', labelsize=12)    
     
-    
-def plot_open_bugs(start:datetime, end:datetime, issues:list[Issue], who:str,
-                  must_include_labels:list[str], must_exclude_labels:list[str]|None=None, interval=7,
-                  as_md: bool = False, outdir=None) -> str:
-    counts = []
-    dates = []
-    counts = {}
-    last = None
-    while start < end:
-        start_local = utc_to_local(start)
-        l = filter_issues(issues, must_include_labels, must_exclude_labels, when=start_local)
-        count = len(list(l))
-        counts[start] = count
-        start += timedelta(days=interval)
-        last = count
-    plot_line(counts, f"Open bug count for {who}", "Date", "Count", x_axis_type="datetime", width=7)
-    if False:
-        # Ideally we would follow this path and render the plot with inline
-        # data, but this doesn't work in GitHub markdown preview.
-        # Save the plot to an in-memory buffer
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png')
-        buf.seek(0)
-        # Encode the image to base64
-        img_base64 = base64.b64encode(buf.read()).decode('utf-8')
-        return f"![](data:image/png;base64,{img_base64})" if as_md else \
-                f'<img src="data:image/png;base64,{img_base64}">'
-    else:
-        # Instead we have to save the plot to file and link to it. But we don't want
-        # lots of files lying around so we just use the same name and hope for the best.
-        # If outdir is specified, create the file there, else just use the current directory.
-        dest = 'bugcount.png' if outdir is None else os.path.join(outdir, 'bugcount.png')
-        plt.savefig(dest)
-        return '![](bugcount.png)' if as_md else f'<img src="bugcount.png">'
-    return img_md
-
 
 class FormatterABC(abc.ABC):
-    def __init__(self, as_table: bool):
+    def __init__(self, as_table: bool, outdir: str|None):
         self.as_table = as_table
+        self.outdir = outdir
 
     @abc.abstractmethod
     def url(self, repo_path: str, issue: Issue) -> str: ...
@@ -459,6 +424,12 @@ class FormatterABC(abc.ABC):
     def end_section(self) -> str: ...    
     @abc.abstractmethod
     def line_separator(self) -> str: ...
+    @abc.abstractmethod
+    def plot(self, name:str|None=None) -> str: ...    
+    @abc.abstractmethod
+    def report(self, org: str, repo: str, now: datetime, report: str,
+               termranks: str, open_bugs_chart: str) -> str: ...
+
 
     def day_message(self, team=None, op=None, threep=None) -> str:
         rtn = '('
@@ -471,8 +442,8 @@ class FormatterABC(abc.ABC):
         return rtn[:-2] + ')'
 
 class HTMLFormatter(FormatterABC):
-    def __init__(self, as_table: bool):
-        super().__init__(as_table)
+    def __init__(self, as_table: bool, outdir: str|None):
+        super().__init__(as_table, outdir)
 
     def url(self, repo_path: str, issue: Issue) -> str:
         title = issue.title.replace('"', "&quot;")
@@ -503,10 +474,39 @@ class HTMLFormatter(FormatterABC):
 
     def line_separator(self) -> str:
         return '<br>\n'
+    
+    def plot(self, name:str|None=None) -> str:
+        # Save the plot to an in-memory buffer
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
+        # Encode the image to base64
+        img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+        return f'<img src="data:image/png;base64,{img_base64}">'
+    
+    def report(self, org: str, repo: str, now: datetime, report: str,
+               termranks: str, open_bugs_chart: str) -> str:
+        return f"""<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>Repo report for {org}/{repo} on {format_date(now)}</title>
+    </head>
+    <body>
+    {open_bugs_chart}
+    <br>
+    <br>    
+    {report}
+    <br>
+    <br>
+    {termranks}
+    </body>
+</html>"""
+    
 
 class TextFormatter(FormatterABC):
-    def __init__(self, as_table: bool):
-        super().__init__(as_table)
+    def __init__(self, as_table: bool, outdir: str|None):
+        super().__init__(as_table, outdir)
 
     def url(self, repo_path: str, issue: Issue) -> str:
         return f'{repo_path}/issues/{issue.number}'
@@ -530,9 +530,17 @@ class TextFormatter(FormatterABC):
     def line_separator(self) -> str:
         return '\n'
     
+    def plot(self, name:str|None=None) -> str:
+        return ''
+         
+    def report(self, org: str, repo: str, now: datetime, report: str,
+               termranks: str, open_bugs_chart: str) -> str:
+        return report + '\n\n' + termranks
+             
+
 class MarkdownFormatter(FormatterABC):
-    def __init__(self, as_table: bool):
-        super().__init__(as_table)
+    def __init__(self, as_table: bool, outdir: str|None):
+        super().__init__(as_table, outdir)
 
     def url(self, repo_path: str, issue: Issue) -> str:
         link = f'{repo_path}/issues/{issue.number}'
@@ -570,7 +578,41 @@ class MarkdownFormatter(FormatterABC):
 
     def line_separator(self) -> str:
         return '\n' if self.as_table else '\n\n'
-            
+
+    def plot(self, name:str|None=None) -> str:
+        # Ideally we would render the plot with inline data, but this doesn't work
+        # in GitHub markdown preview.
+        # Instead we have to save the plot to file and link to it. But we don't want
+        # lots of files lying around so we just use the same name and hope for the best.
+        # If outdir is specified, create the file there, else just use the current directory.
+        if name is None:
+            return ''
+        fname = name + '.png'
+        dest = os.path.join(self.outdir, fname) if self.outdir is not None else fname
+        plt.savefig(dest)
+        return f'![]({fname})'                    
+
+    def report(self, org: str, repo: str, now: datetime, report: str,
+               termranks: str, open_bugs_chart: str) -> str:
+        return open_bugs_chart + '\n\n' + report + '\n\n' + termranks
+    
+
+def plot_open_bugs(formatter: FormatterABC, start:datetime, end:datetime, issues:list[Issue], who:str, 
+                  must_include_labels:list[str], must_exclude_labels:list[str]|None=None, interval=7) -> str:
+    counts = []
+    dates = []
+    counts = {}
+    last = None
+    while start < end:
+        start_local = utc_to_local(start)
+        l = filter_issues(issues, must_include_labels, must_exclude_labels, when=start_local)
+        count = len(list(l))
+        counts[start] = count
+        start += timedelta(days=interval)
+        last = count
+    plot_line(counts, f"Open bug count for {who}", "Date", "Count", x_axis_type="datetime", width=7)
+    return formatter.plot('bugcount')
+
 
 def get_subset(issues:list[Issue], members: set[str], bug_flag: bool, bug_label: str = 'bug') -> Generator[Issue, None, None]:
     return filter_issues(issues, must_include_labels=[bug_label], must_not_be_created_by=members) if bug_flag \
@@ -871,9 +913,9 @@ def create_report(org: str, repo: str, token: str, out: str|None=None,
     # We don't include label params for feature request/needs info because we don't use them
     # in the report right now, although they might be useful in the future.
     fmt = out[out.rfind('.'):] if out is not None else '.txt'
-    formatter = HTMLFormatter(as_table) if fmt == '.html' else \
-                (MarkdownFormatter(as_table) if fmt == '.md' else \
-                 TextFormatter(as_table))
+    formatter = HTMLFormatter(as_table, outdir) if fmt == '.html' else \
+                (MarkdownFormatter(as_table, outdir) if fmt == '.md' else \
+                 TextFormatter(as_table, outdir))
     members = get_team_members(org, repo, token, extra_members, verbose)
     issues = list(get_issues(org, repo, token, members, state='OPEN', \
                         chunk=chunk, verbose=verbose).values())   
@@ -882,35 +924,13 @@ def create_report(org: str, repo: str, token: str, out: str|None=None,
                            formatter=formatter, days=days, stale=stale, show_all=show_all)
     
     termranks = find_top_terms(issues, formatter)
-    if fmt == '.txt':
-        result = report + '\n\n' + termranks
+    if show_all and fmt != '.txt':
+        open_bugs_chart = plot_open_bugs(formatter, now-timedelta(days=xrange), now,
+                                         issues, repo, [bug_label], interval=1)
     else:
-        if show_all:
-            open_bugs_chart = plot_open_bugs(now-timedelta(days=xrange), now, issues,
-                               repo, [bug_label], interval=1, as_md=(fmt=='.md'),
-                               outdir=outdir)
-        else:
-            open_bugs_chart = ''
-        if fmt == '.md':
-            result = open_bugs_chart + '\n\n' + report + '\n\n' + termranks
-        else:
-            result = f"""<!DOCTYPE html>
-<html lang="en">
-    <head>
-        <meta charset="utf-8">
-        <title>Repo report for {org}/{repo} on {format_date(now)}</title>
-    </head>
-    <body>
-    {open_bugs_chart}
-    <br>
-    <br>    
-    {report}
-    <br>
-    <br>
-    {termranks}
-    </body>
-</html>"""
+        open_bugs_chart = ''
 
+    result = formatter.report(org, repo, now, report, termranks, open_bugs_chart)
     output_result(out, result, now)
 
 
