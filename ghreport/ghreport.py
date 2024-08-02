@@ -48,6 +48,13 @@ class Issue:
     events: list[Event]
 
 
+@dataclass
+class PullRequest:
+    number: int
+    created_at: datetime 
+    closed_at: datetime | None
+
+
 def get_members(owner:str, repo:str, token:str) -> set[str]:
     """ 
     Get the team members for a repo that have push or admin rights. This is not
@@ -72,7 +79,7 @@ def get_members(owner:str, repo:str, token:str) -> set[str]:
 
 
 # Arguments with ! are required.
-issues_with_comments = """
+issues_with_comments_query = """
 query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, $cursor: String, $chunk: Int) {
   rateLimit {
     remaining
@@ -159,7 +166,7 @@ query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, 
 """
 
 # A variant of the above that skips comments and can limit to recent issues.
-issues_without_comments = """
+issues_without_comments_query = """
 query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, $cursor: String, $chunk: Int) {
     rateLimit {
         remaining
@@ -175,70 +182,77 @@ query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, 
       }
       nodes {
         number
-        title
         createdAt
         closedAt        
-        author {
-          login
-        }
-        editor {
-          login
-        }
-        timelineItems(
-          first: 100
-          itemTypes: [CLOSED_EVENT, LABELED_EVENT, UNLABELED_EVENT]
-        ) {
-          nodes {
-            __typename
-            ... on ClosedEvent {
-              actor {
-                login
-              }
-              createdAt
-            }
-            ... on LabeledEvent {
-              label {
-                name
-              }
-              actor {
-                login
-              }
-              createdAt
-            }
-            ... on UnlabeledEvent {
-              label {
-                name
-              }
-              actor {
-                login
-              }
-              createdAt
-            }
-            ... on AssignedEvent {
-              assignee {
-                ... on User {
-                  login
-                }
-              }
-              createdAt              
-            }
-            ... on UnassignedEvent {
-              assignee {
-                ... on User {
-                  login
-                }
-              }
-              createdAt               
-            }
-          }
-        }
       }
     }
   }
 }
 """
 
+# This query gets closed pull requests, so we can calculate the time to close.
 
+# Arguments with ! are required.
+pull_requests_query = """
+query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, $cursor: String, $chunk: Int) {
+    rateLimit {
+        remaining
+        cost
+        resetAt
+    }
+    repository(owner: $owner, name: $repo) {
+        pullRequests(states: [$state], first: $chunk, after: $cursor, filterBy: { since: $since }) {
+        totalCount
+        pageInfo {
+            endCursor
+            hasNextPage
+        }
+        nodes {
+            number
+            title
+            createdAt
+            closedAt
+            author {
+                login
+            }
+            editor {
+                login
+            }
+            timelineItems(
+                first: 100
+                itemTypes: [CLOSED_EVENT, LABELED_EVENT, UNLABELED_EVENT]
+            ) {
+                nodes {
+                    __typename
+                    ... on ClosedEvent {
+                        actor {
+                            login
+                        }
+                        createdAt
+                    }
+                    ... on LabeledEvent {
+                        label {
+                            name
+                        }
+                        actor {
+                            login
+                        }
+                        createdAt
+                    }
+                    ... on UnlabeledEvent {
+                        label {
+                            name
+                        }
+                        actor {
+                            login
+                        }
+                        createdAt
+                    }
+                }
+            }
+        }
+    }
+"""
 
 utc=pytz.UTC
 
@@ -269,6 +283,18 @@ def format_date(d: datetime) -> str:
     return f'{d.year}-{d.month:02d}-{d.day:02d}'
 
 
+def parse_raw_pull_request(pull_request: dict) -> PullRequest | None:
+    try:
+        number = pull_request['number']
+        created_at: datetime = parse_date(pull_request['createdAt'])
+        closed_at: datetime | None = parse_date(pull_request['closedAt']) if pull_request['closedAt'] else None
+    except Exception as e:
+        print(f'Failed to parse pull_request\n{pull_request}: {e}')
+        return None
+                                         
+    return PullRequest(number, created_at, closed_at)
+
+
 def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
     try:
         number = issue['number']
@@ -276,7 +302,7 @@ def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
         created_by: str = get_who(issue, 'author', 'UNKNOWN')
         closed_by: str | None = None
         created_at: datetime = parse_date(issue['createdAt'])
-        closed_at: datetime | None = parse_date(issue['createdAt']) if issue['closedAt'] else None
+        closed_at: datetime | None = parse_date(issue['closedAt']) if issue['closedAt'] else None
         events = []
 
         # Treat the initial description as a response if by a team member    
@@ -334,6 +360,62 @@ def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
                  events)
 
 
+async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'OPEN', \
+                                chunk:int = 25, since: datetime|None=None,
+                                verbose:bool = False) -> list[dict]:
+    cursor = None
+    pull_requests = []
+    count = 0
+    total_cost = 0
+    total_requests = 0
+    remaining = 0
+
+    if since is None:
+        since = datetime.now() - timedelta(days=365*5)
+
+    # Format the date as required by the GitHub API
+    since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    async with httpx.AsyncClient() as client:
+        gh = gidgethub.httpx.GitHubAPI(client, owner,
+                                       oauth_token=token)
+        reset_at = None
+        while True:
+            result = await gh.graph(pull_requests_query, owner=owner, repo=repo,
+                                    state=state, since=since_str,
+                                    cursor=cursor, chunk=chunk)
+            limit = result['rateLimit']                
+            reset_at = parse_date(limit['resetAt'])                
+
+            total_requests += 1
+            data = result['repository']['pullRequests']
+            if 'nodes' in data:
+                for pull_request in data['nodes']:
+                    pull_requests.append(pull_request)  # Maybe extend is possible; playing safe
+
+            if data['pageInfo']['hasNextPage']:
+                cursor = data['pageInfo']['endCursor']
+            else:
+                break
+                
+            total_cost += limit['cost']
+            remaining = limit['remaining']
+            
+            if limit['cost'] * 3 > remaining:
+                # Pre-emptively rate limit
+                sleep_time = date_diff(reset_at, datetime.now()).seconds + 1
+                print(f'Fetched {count} PRs of {data["totalCount"]} but need to wait {sleep_time} seconds')
+                await asyncio.sleep(sleep_time)               
+ 
+    if verbose:
+        print(f'GitHub API stats for {repo}:')
+        print(f'  Total requests: {total_requests}')
+        print(f'  Total cost: {total_cost}')     
+        print(f'  Average cost per request: {total_cost / total_requests}')
+        print(f'  Remaining: {remaining}')
+    return pull_requests
+
+
 async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'OPEN', \
                          chunk:int = 25, include_comments: bool = True, 
                          since: datetime|None=None, verbose:bool = False) -> list[dict]:
@@ -356,11 +438,11 @@ async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'OPEN', \
         reset_at = None
         while True:
             if include_comments:
-                result = await gh.graphql(issues_with_comments, owner=owner, repo=repo, 
+                result = await gh.graphql(issues_with_comments_query, owner=owner, repo=repo, 
                                           state=state, since=since_str,
                                           cursor=cursor, chunk=chunk)
             else:
-                result = await gh.graph(issues_without_comments, owner=owner, repo=repo,
+                result = await gh.graph(issues_without_comments_query, owner=owner, repo=repo,
                                         state=state, since=since_str,
                                         cursor=cursor, chunk=chunk)
             limit = result['rateLimit']                
@@ -393,6 +475,25 @@ async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'OPEN', \
         print(f'  Average cost per request: {total_cost / total_requests}')
         print(f'  Remaining: {remaining}')
     return issues
+
+
+def get_pull_requests(owner:str, repo:str, token:str, state: str='OPEN', \
+               chunk:int = 25, raw_pull_requests: list[dict[str,str]]|None=None, \
+               since: datetime|None=None, verbose:bool = False) -> dict[str, PullRequest]:
+    if raw_pull_requests is None:
+        # non-Jupyter case
+        # Next line won't work in Jupyter; instead we have to get raw issues in 
+        # one cell and then do this in another cell        
+        raw_pull_requests = asyncio.run(get_raw_pull_requests(owner, repo, token, 
+                                                state=state, chunk=chunk, 
+                                                since=since,
+                                                verbose=verbose)) 
+    pull_requests = {}    
+    for issue in raw_pull_requests:
+        parsed_pull_request = parse_raw_pull_request(issue)
+        if parsed_pull_request:
+            pull_requests[issue['number']] = parsed_pull_request
+    return pull_requests
 
 
 def get_issues(owner:str, repo:str, token:str, members:set[str], state: str='OPEN', \
