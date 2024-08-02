@@ -1,6 +1,8 @@
 """ghreport - Github report generator. """
 
-__version__ = '0.52'
+__version__ = '0.53'
+
+import os
 import click
 from .ghreport import get_training, get_training_details, create_report
 
@@ -41,6 +43,8 @@ def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange
     the users specified on the command line to define the team members.
     """
     
+    if token == '--':
+        token = os.environ.get('GH_TOKEN') or ''
     owner, repo_name = repo.split('/')
     if xrange < 7:
         xrange = 7
@@ -72,6 +76,8 @@ def training(repo, token, out, verbose, team, bug, feat, info, num):
     You normally should not need to use the num argument unless you are experiencing
     timeouts from the GitHub API; in this case you may want to try a lower value.
     """
+    if token == '--':
+        token = os.environ.get('GH_TOKEN') or ''    
     owner, repo_name = repo.split('/')
     get_training(owner, repo_name, token, out, verbose=verbose, extra_members=team, exclude_labels=[bug, feat, info])
 

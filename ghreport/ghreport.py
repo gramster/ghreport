@@ -72,15 +72,15 @@ def get_members(owner:str, repo:str, token:str) -> set[str]:
 
 
 # Arguments with ! are required.
-issues_query = """
-query ($owner: String!, $repo: String!, $state: IssueState!, $cursor: String, $chunk: Int) {
+issues_with_comments = """
+query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, $cursor: String, $chunk: Int) {
   rateLimit {
     remaining
     cost
     resetAt
   }
   repository(owner: $owner, name: $repo) {
-    issues(states: [$state], first: $chunk, after: $cursor) {
+    issues(states: [$state], first: $chunk, after: $cursor, filterBy: { since: $since }) {
       totalCount
       pageInfo {
         endCursor
@@ -157,6 +157,87 @@ query ($owner: String!, $repo: String!, $state: IssueState!, $cursor: String, $c
   }
 }
 """
+
+# A variant of the above that skips comments and can limit to recent issues.
+issues_without_comments = """
+query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, $cursor: String, $chunk: Int) {
+    rateLimit {
+        remaining
+        cost
+        resetAt
+    }
+  repository(owner: $owner, name: $repo) {
+    issues(states: [$state], first: $chunk, after: $cursor, filterBy: { since: $since }) {
+      totalCount
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+      nodes {
+        number
+        title
+        createdAt
+        closedAt        
+        author {
+          login
+        }
+        editor {
+          login
+        }
+        timelineItems(
+          first: 100
+          itemTypes: [CLOSED_EVENT, LABELED_EVENT, UNLABELED_EVENT]
+        ) {
+          nodes {
+            __typename
+            ... on ClosedEvent {
+              actor {
+                login
+              }
+              createdAt
+            }
+            ... on LabeledEvent {
+              label {
+                name
+              }
+              actor {
+                login
+              }
+              createdAt
+            }
+            ... on UnlabeledEvent {
+              label {
+                name
+              }
+              actor {
+                login
+              }
+              createdAt
+            }
+            ... on AssignedEvent {
+              assignee {
+                ... on User {
+                  login
+                }
+              }
+              createdAt              
+            }
+            ... on UnassignedEvent {
+              assignee {
+                ... on User {
+                  login
+                }
+              }
+              createdAt               
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 
 
 utc=pytz.UTC
@@ -253,8 +334,9 @@ def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
                  events)
 
 
-async def get_raw_issues(query: str, owner:str, repo:str, token:str, state:str = 'OPEN', \
-                         chunk:int = 25, verbose:bool = False) -> list[dict]:
+async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'OPEN', \
+                         chunk:int = 25, include_comments: bool = True, 
+                         since: datetime|None=None, verbose:bool = False) -> list[dict]:
     cursor = None
     issues = []
     count = 0
@@ -262,12 +344,25 @@ async def get_raw_issues(query: str, owner:str, repo:str, token:str, state:str =
     total_requests = 0
     remaining = 0
 
+    if since is None:
+        since = datetime.now() - timedelta(days=365*5)
+
+    # Format the date as required by the GitHub API
+    since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
     async with httpx.AsyncClient() as client:
         gh = gidgethub.httpx.GitHubAPI(client, owner,
                                        oauth_token=token)
         reset_at = None
         while True:
-            result = await gh.graphql(query, owner=owner, repo=repo, state=state, cursor=cursor, chunk=chunk)
+            if include_comments:
+                result = await gh.graphql(issues_with_comments, owner=owner, repo=repo, 
+                                          state=state, since=since_str,
+                                          cursor=cursor, chunk=chunk)
+            else:
+                result = await gh.graph(issues_without_comments, owner=owner, repo=repo,
+                                        state=state, since=since_str,
+                                        cursor=cursor, chunk=chunk)
             limit = result['rateLimit']                
             reset_at = parse_date(limit['resetAt'])                
 
@@ -302,12 +397,17 @@ async def get_raw_issues(query: str, owner:str, repo:str, token:str, state:str =
 
 def get_issues(owner:str, repo:str, token:str, members:set[str], state: str='OPEN', \
                chunk:int = 25, raw_issues: list[dict[str,str]]|None=None, \
+               include_comments: bool = True, since: datetime|None=None,
                verbose:bool = False) -> dict[str, Issue]:
     if raw_issues is None:
         # non-Jupyter case
         # Next line won't work in Jupyter; instead we have to get raw issues in 
         # one cell and then do this in another cell        
-        raw_issues = asyncio.run(get_raw_issues(issues_query, owner, repo, token, state=state, chunk=chunk, verbose=verbose)) 
+        raw_issues = asyncio.run(get_raw_issues(owner, repo, token, 
+                                                state=state, chunk=chunk, 
+                                                include_comments=include_comments, 
+                                                since=since,
+                                                verbose=verbose)) 
     issues = {}    
     for issue in raw_issues:
         parsed_issue = parse_raw_issue(issue, members)
@@ -316,9 +416,12 @@ def get_issues(owner:str, repo:str, token:str, members:set[str], state: str='OPE
     return issues
 
 
-def filter_issues(issues: Iterable[Issue], must_include_labels:list[str]|None=None, must_exclude_labels:list[str]|None=None,
-                  must_be_created_by: set[str]|None=None, must_not_be_created_by: set[str]|None = None,
-                  when:datetime|None=None) -> Generator[Issue, None, None]:
+def filter_issues(issues: Iterable[Issue], 
+                       must_include_labels:list[str]|None=None, 
+                       must_exclude_labels:list[str]|None=None,
+                       must_be_created_by: set[str]|None=None, 
+                       must_not_be_created_by: set[str]|None = None,
+                       must_be_open_at:datetime|None=None) -> Generator[Issue, None, None]:
     """
     Get issues that were open at the given time and have (or don't have) the given labels.
     """
@@ -327,19 +430,19 @@ def filter_issues(issues: Iterable[Issue], must_include_labels:list[str]|None=No
             continue
         if must_not_be_created_by and i.created_by in must_not_be_created_by:
             continue
-        if when:
+        if must_be_open_at:
             created_at = utc_to_local(i.created_at)
-            if created_at > when:
+            if created_at > must_be_open_at:
                 continue
 
             if i.closed_at is not None:
                 closed_at = utc_to_local(i.closed_at)            
-                if closed_at < when:
+                if closed_at < must_be_open_at:
                     continue
                 
         labels = set()
         for e in i.events:
-            if when and e.when > when:
+            if must_be_open_at and e.when > must_be_open_at:
                 break
             if e.event == 'labeled':
                 labels.add(e.arg)
@@ -605,7 +708,7 @@ def plot_open_bugs(formatter: FormatterABC, start:datetime, end:datetime, issues
     last = None
     while start < end:
         start_local = utc_to_local(start)
-        l = filter_issues(issues, must_include_labels, must_exclude_labels, when=start_local)
+        l = filter_issues(issues, must_include_labels, must_exclude_labels, must_be_open_at=start_local)
         count = len(list(l))
         counts[start] = count
         start += timedelta(days=interval)
