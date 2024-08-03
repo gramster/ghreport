@@ -50,9 +50,8 @@ class Issue:
 
 @dataclass
 class PullRequest:
-    number: int
     created_at: datetime 
-    closed_at: datetime | None
+    merged_at: datetime | None
 
 
 def get_members(owner:str, repo:str, token:str) -> set[str]:
@@ -168,11 +167,11 @@ query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, 
 # A variant of the above that skips comments and can limit to recent issues.
 issues_without_comments_query = """
 query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, $cursor: String, $chunk: Int) {
-    rateLimit {
-        remaining
-        cost
-        resetAt
-    }
+  rateLimit {
+    remaining
+    cost
+    resetAt
+  }
   repository(owner: $owner, name: $repo) {
     issues(states: [$state], first: $chunk, after: $cursor, filterBy: { since: $since }) {
       totalCount
@@ -182,76 +181,95 @@ query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, 
       }
       nodes {
         number
+        title
         createdAt
         closedAt        
+        author {
+          login
+        }
+        editor {
+          login
+        }
+        timelineItems(
+          first: 100
+          itemTypes: [CLOSED_EVENT, LABELED_EVENT, UNLABELED_EVENT]
+        ) {
+          nodes {
+            __typename
+            ... on ClosedEvent {
+              actor {
+                login
+              }
+              createdAt
+            }
+            ... on LabeledEvent {
+              label {
+                name
+              }
+              actor {
+                login
+              }
+              createdAt
+            }
+            ... on UnlabeledEvent {
+              label {
+                name
+              }
+              actor {
+                login
+              }
+              createdAt
+            }
+            ... on AssignedEvent {
+              assignee {
+                ... on User {
+                  login
+                }
+              }
+              createdAt              
+            }
+            ... on UnassignedEvent {
+              assignee {
+                ... on User {
+                  login
+                }
+              }
+              createdAt               
+            }
+          }
+        }
       }
     }
   }
 }
 """
 
-# This query gets closed pull requests, so we can calculate the time to close.
+# This query gets closed pull requests, so we can calculate the time to merge.
+# Currently it doesn't filter on dates, as PR queries don't support that.
+# Would need to use the GH search API. 
 
 # Arguments with ! are required.
 pull_requests_query = """
-query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, $cursor: String, $chunk: Int) {
+query ($owner: String!, $repo: String!, $state: PullRequestState!, $cursor: String, $chunk: Int) {
     rateLimit {
         remaining
         cost
         resetAt
     }
     repository(owner: $owner, name: $repo) {
-        pullRequests(states: [$state], first: $chunk, after: $cursor, filterBy: { since: $since }) {
-        totalCount
-        pageInfo {
-            endCursor
-            hasNextPage
-        }
-        nodes {
-            number
-            title
-            createdAt
-            closedAt
-            author {
-                login
+        pullRequests(states: [$state], first: $chunk, after: $cursor) {
+            totalCount
+            pageInfo {
+                endCursor
+                hasNextPage
             }
-            editor {
-                login
-            }
-            timelineItems(
-                first: 100
-                itemTypes: [CLOSED_EVENT, LABELED_EVENT, UNLABELED_EVENT]
-            ) {
-                nodes {
-                    __typename
-                    ... on ClosedEvent {
-                        actor {
-                            login
-                        }
-                        createdAt
-                    }
-                    ... on LabeledEvent {
-                        label {
-                            name
-                        }
-                        actor {
-                            login
-                        }
-                        createdAt
-                    }
-                    ... on UnlabeledEvent {
-                        label {
-                            name
-                        }
-                        actor {
-                            login
-                        }
-                        createdAt
-                    }
-                }
+            nodes {
+                createdAt
+                mergedAt        
             }
         }
     }
+}
 """
 
 utc=pytz.UTC
@@ -285,14 +303,13 @@ def format_date(d: datetime) -> str:
 
 def parse_raw_pull_request(pull_request: dict) -> PullRequest | None:
     try:
-        number = pull_request['number']
         created_at: datetime = parse_date(pull_request['createdAt'])
-        closed_at: datetime | None = parse_date(pull_request['closedAt']) if pull_request['closedAt'] else None
+        merged_at: datetime | None = parse_date(pull_request['mergedAt']) if pull_request['mergedAt'] else None
     except Exception as e:
         print(f'Failed to parse pull_request\n{pull_request}: {e}')
         return None
                                          
-    return PullRequest(number, created_at, closed_at)
+    return PullRequest(created_at, merged_at)
 
 
 def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
@@ -361,7 +378,7 @@ def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
 
 
 async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'OPEN', \
-                                chunk:int = 25, since: datetime|None=None,
+                                chunk:int = 100, since: datetime|None=None,
                                 verbose:bool = False) -> list[dict]:
     cursor = None
     pull_requests = []
@@ -381,9 +398,8 @@ async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'OPE
                                        oauth_token=token)
         reset_at = None
         while True:
-            result = await gh.graph(pull_requests_query, owner=owner, repo=repo,
-                                    state=state, since=since_str,
-                                    cursor=cursor, chunk=chunk)
+            result = await gh.graphql(pull_requests_query, owner=owner, repo=repo,
+                                    state=state, cursor=cursor, chunk=chunk)
             limit = result['rateLimit']                
             reset_at = parse_date(limit['resetAt'])                
 
@@ -391,7 +407,8 @@ async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'OPE
             data = result['repository']['pullRequests']
             if 'nodes' in data:
                 for pull_request in data['nodes']:
-                    pull_requests.append(pull_request)  # Maybe extend is possible; playing safe
+                    if pull_request['createdAt'] >= since_str:
+                        pull_requests.append(pull_request)
 
             if data['pageInfo']['hasNextPage']:
                 cursor = data['pageInfo']['endCursor']
@@ -442,7 +459,7 @@ async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'OPEN', \
                                           state=state, since=since_str,
                                           cursor=cursor, chunk=chunk)
             else:
-                result = await gh.graph(issues_without_comments_query, owner=owner, repo=repo,
+                result = await gh.graphql(issues_without_comments_query, owner=owner, repo=repo,
                                         state=state, since=since_str,
                                         cursor=cursor, chunk=chunk)
             limit = result['rateLimit']                
@@ -478,8 +495,8 @@ async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'OPEN', \
 
 
 def get_pull_requests(owner:str, repo:str, token:str, state: str='OPEN', \
-               chunk:int = 25, raw_pull_requests: list[dict[str,str]]|None=None, \
-               since: datetime|None=None, verbose:bool = False) -> dict[str, PullRequest]:
+               chunk:int = 100, raw_pull_requests: list[dict[str,str]]|None=None, \
+               since: datetime|None=None, verbose:bool = False) -> list[PullRequest]:
     if raw_pull_requests is None:
         # non-Jupyter case
         # Next line won't work in Jupyter; instead we have to get raw issues in 
@@ -488,11 +505,11 @@ def get_pull_requests(owner:str, repo:str, token:str, state: str='OPEN', \
                                                 state=state, chunk=chunk, 
                                                 since=since,
                                                 verbose=verbose)) 
-    pull_requests = {}    
+    pull_requests = []    
     for issue in raw_pull_requests:
         parsed_pull_request = parse_raw_pull_request(issue)
         if parsed_pull_request:
-            pull_requests[issue['number']] = parsed_pull_request
+            pull_requests.append(parsed_pull_request)
     return pull_requests
 
 
@@ -568,10 +585,11 @@ def filter_issues(issues: Iterable[Issue],
         yield i
 
         
-def plot_line(data, title:str, x_title:str, y_title:str, x_axis_type=None, width=0.9):  
+def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None, 
+              width=0.9, chart_type:str='line'):
     x = sorted([k for k in data.keys()])
     y = [data[k] for k in x]
-    max_y = max(y)
+    max_y = max(y) if y else 0
     # Need vbar x param as list of strings else bars aren't centered  
     x_range = x
     if not x_axis_type:
@@ -589,8 +607,11 @@ def plot_line(data, title:str, x_title:str, y_title:str, x_axis_type=None, width
     fig.set_facecolor('#efefef')
     ax.set_facecolor('#efefef')
 
-    # Plot the line
-    ax.plot(x, y, color="navy")
+    # Plot the line or bar
+    if chart_type == "line":
+        ax.plot(x, y, color="navy")
+    else:
+        ax.bar(x, y, color="navy", width=width)
 
     # Customize grid lines
     ax.grid(True, which='both', linewidth=2)
@@ -631,8 +652,9 @@ class FormatterABC(abc.ABC):
     @abc.abstractmethod
     def plot(self, name:str|None=None) -> str: ...    
     @abc.abstractmethod
-    def report(self, org: str, repo: str, now: datetime, report: str,
-               termranks: str, open_bugs_chart: str) -> str: ...
+    def report(self, org: str, repo: str, now: datetime, 
+               report: str, termranks: str, 
+               open_bugs_chart: str, pr_close_time_chart: str) -> str: ...
 
 
     def day_message(self, team=None, op=None, threep=None) -> str:
@@ -689,7 +711,8 @@ class HTMLFormatter(FormatterABC):
         return f'<img src="data:image/png;base64,{img_base64}">'
     
     def report(self, org: str, repo: str, now: datetime, report: str,
-               termranks: str, open_bugs_chart: str) -> str:
+               termranks: str, open_bugs_chart: str, pr_close_time_chart: str) -> str:
+        section_sep = '<br>\n<br>\n'
         return f"""<!DOCTYPE html>
 <html lang="en">
     <head>
@@ -697,13 +720,7 @@ class HTMLFormatter(FormatterABC):
         <title>Repo report for {org}/{repo} on {format_date(now)}</title>
     </head>
     <body>
-    {open_bugs_chart}
-    <br>
-    <br>    
-    {report}
-    <br>
-    <br>
-    {termranks}
+    {section_sep.join([open_bugs_chart, pr_close_time_chart, report, termranks])}
     </body>
 </html>"""
     
@@ -738,7 +755,7 @@ class TextFormatter(FormatterABC):
         return ''
          
     def report(self, org: str, repo: str, now: datetime, report: str,
-               termranks: str, open_bugs_chart: str) -> str:
+               termranks: str, open_bugs_chart: str, pr_close_time_chart: str) -> str:
         return report + '\n\n' + termranks
              
 
@@ -797,8 +814,8 @@ class MarkdownFormatter(FormatterABC):
         return f'![]({fname})'                    
 
     def report(self, org: str, repo: str, now: datetime, report: str,
-               termranks: str, open_bugs_chart: str) -> str:
-        return open_bugs_chart + '\n\n' + report + '\n\n' + termranks
+               termranks: str, open_bugs_chart: str, pr_close_time_chart: str) -> str:
+        return '\n\n'.join([open_bugs_chart, pr_close_time_chart, report, termranks])
     
 
 def plot_open_bugs(formatter: FormatterABC, start:datetime, end:datetime, issues:list[Issue], who:str, 
@@ -814,7 +831,7 @@ def plot_open_bugs(formatter: FormatterABC, start:datetime, end:datetime, issues
         counts[start] = count
         start += timedelta(days=interval)
         last = count
-    plot_line(counts, f"Open bug count for {who}", "Date", "Count", x_axis_type="datetime", width=7)
+    plot_data(counts, f"Open bug count for {who}", "Date", "Count", x_axis_type="datetime", chart_type="bar")
     return formatter.plot('bugcount')
 
 
@@ -1104,10 +1121,53 @@ def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5)
     return (formatter.line_separator() * 3).join(report_sections)
 
 
-def create_report(org: str, repo: str, token: str, out: str|None=None, 
-           as_table:bool=False, verbose: bool=False, days: int=1, stale: int=30, \
-           extra_members: str|None=None, bug_label: str ='bug', \
-           xrange: int=180, chunk: int=25, show_all: bool=False) -> None:
+def median(numbers: list[int]) -> int:
+    sorted_numbers = sorted(numbers)
+    n = len(sorted_numbers)
+    return sorted_numbers[n // 2]
+    
+
+def plot_median_time_to_close_prs(formatter: FormatterABC, 
+                                 org: str, repo: str, token: str, verbose: bool=False) -> str:
+    """
+    Get all closed PRs from the past year, then calculate the median time to close for each month,
+    and return a chart of the results.  
+    """
+    now = datetime.now()
+    since = now - timedelta(days=365)
+    pull_requests = get_pull_requests(org, repo, token, state='MERGED', since=since, verbose=verbose)
+
+    # Gather the time to close for each PR and bucket by month
+    months = {}
+    for pr in pull_requests:
+        if pr.merged_at is None:
+            continue
+        month = f'{pr.created_at.year}-{pr.created_at.month:02}'
+        if month not in months:
+            months[month] = []
+        months[month].append(date_diff(pr.merged_at, pr.created_at).days)
+
+    # Calculate the medians
+    medians = {}
+    for month, times in months.items():
+        medians[month[2:]] = median(times)
+
+    # Plot the results  
+    plot_data(medians, f"Median time to merge PRs for {org}/{repo}", "Month", "Days", width=0.9,
+             chart_type='bar')
+    return formatter.plot('median_time_to_merge_prs')
+
+        
+
+def create_report(org: str, issues_repo: str, token: str,
+                  out: str|None=None, as_table:bool=False, verbose: bool=False, 
+                  days: int=1, stale: int=30, extra_members: str|None=None,
+                  bug_label: str ='bug', xrange: int=180, chunk: int=25, 
+                  show_all: bool=False, pr_repo: str|None=None) -> None:
+    # Initialize all the outputs here; makes it easy to comment out stuff
+    # below when debugging
+    report = termranks = open_bugs_chart = pr_close_time_chart = ''
+    pr_repo = issues_repo if pr_repo is None else pr_repo
     # Make sure the folder exists for the file specified by out
     outdir = None
     if out is not None:
@@ -1120,23 +1180,19 @@ def create_report(org: str, repo: str, token: str, out: str|None=None,
     formatter = HTMLFormatter(as_table, outdir) if fmt == '.html' else \
                 (MarkdownFormatter(as_table, outdir) if fmt == '.md' else \
                  TextFormatter(as_table, outdir))
-    members = get_team_members(org, repo, token, extra_members, verbose)
-    issues = list(get_issues(org, repo, token, members, state='OPEN', \
+    members = get_team_members(org, issues_repo, token, extra_members, verbose)
+    issues = list(get_issues(org, issues_repo, token, members, state='OPEN', \
                         chunk=chunk, verbose=verbose).values())   
     now = datetime.now()
-    report = find_revisits(now, org, repo, issues, members=members, bug_label=bug_label,
+    report = find_revisits(now, org, issues_repo, issues, members=members, bug_label=bug_label,
                            formatter=formatter, days=days, stale=stale, show_all=show_all)
-    
+
     termranks = find_top_terms(issues, formatter)
     if show_all and fmt != '.txt':
         open_bugs_chart = plot_open_bugs(formatter, now-timedelta(days=xrange), now,
-                                         issues, repo, [bug_label], interval=1)
-    else:
-        open_bugs_chart = ''
+                                         issues, issues_repo, [bug_label], interval=1)
+        pr_close_time_chart = plot_median_time_to_close_prs(formatter, org, pr_repo, token, verbose)
 
-    result = formatter.report(org, repo, now, report, termranks, open_bugs_chart)
+    result = formatter.report(org, issues_repo, now, report, termranks, open_bugs_chart, pr_close_time_chart)
     output_result(out, result, now)
 
-
-
-     
