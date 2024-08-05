@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 #from bokeh.io import output_notebook
 import pandas as pd
 import seaborn as sns
+import wordcloud
 
 
 #plt.style.use('bmh')
@@ -831,7 +832,7 @@ def plot_open_bugs(formatter: FormatterABC, start:datetime, end:datetime, issues
         counts[start] = count
         start += timedelta(days=interval)
         last = count
-    plot_data(counts, f"Open bug count for {who}", "Date", "Count", x_axis_type="datetime", chart_type="bar")
+    plot_data(counts, f"Open bug count for {who}", "Date", "Count", x_axis_type="datetime", width=7)
     return formatter.plot('bugcount')
 
 
@@ -1103,7 +1104,15 @@ def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5)
 
     # Sort issues_with_term by length of list descending
     sorted_terms = sorted(issues_with_term.items(), key=lambda x: len(x[1]), reverse=True)
-    report_sections = []
+
+    cloud = wordcloud.WordCloud(width=800, height=600, max_words=50,
+                                background_color='white').generate_from_frequencies({k: len(v) for k, v in sorted_terms})
+    
+    plt.imshow(cloud, interpolation='bilinear')
+    plt.axis('off')
+    cloud_text = formatter.plot('termcloud')
+
+    report_sections = [cloud_text]
     now = datetime.now()
     for term, issues in sorted_terms:
         if len(issues) < min_count:
