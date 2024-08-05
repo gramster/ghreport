@@ -1,10 +1,10 @@
 """ghreport - Github report generator. """
 
-__version__ = '0.70'
+__version__ = '0.72'
 
 import os
 import click
-from .ghreport import get_training, get_training_details, create_report
+from .ghreport import get_training_data, get_issue_bodies_and_first_team_comments, create_report
 
 
 @click.group()
@@ -79,7 +79,7 @@ def training(repo, token, out, verbose, team, bug, feat, info, num):
     if token == '--':
         token = os.environ.get('GH_TOKEN') or ''    
     owner, repo_name = repo.split('/')
-    get_training(owner, repo_name, token, out, verbose=verbose, extra_members=team, exclude_labels=[bug, feat, info])
+    get_training_data(owner, repo_name, token, out, verbose=verbose, extra_members=team, exclude_labels=[bug, feat, info])
 
 
 def main():

@@ -7,7 +7,7 @@ from json import dumps
 import os
 import time
 import asyncio
-from typing import Generator, Iterable, Sequence
+from typing import Any, Callable, Generator, Iterable, Sequence
 from github import Github
 import pytz
 import httpx
@@ -25,6 +25,16 @@ import wordcloud
 
 #plt.style.use('bmh')
 
+
+def median(numbers: list[int]) -> int:
+    # Strictly speaking if there are an even number of elelemts in the 
+    # list the median is the mean of the two middle elements. But we'll
+    # just return the lower of the two middle elements. That avoids
+    # turning ints into floats and is good enough for our purposes.
+    sorted_numbers = sorted(numbers)
+    n = len(sorted_numbers)
+    return sorted_numbers[n // 2]
+    
 
 @dataclass
 class Event:
@@ -655,7 +665,7 @@ class FormatterABC(abc.ABC):
     @abc.abstractmethod
     def report(self, org: str, repo: str, now: datetime, 
                report: str, termranks: str, 
-               open_bugs_chart: str, pr_close_time_chart: str) -> str: ...
+               charts: list[str]) -> str: ...
 
 
     def day_message(self, team=None, op=None, threep=None) -> str:
@@ -712,7 +722,10 @@ class HTMLFormatter(FormatterABC):
         return f'<img src="data:image/png;base64,{img_base64}">'
     
     def report(self, org: str, repo: str, now: datetime, report: str,
-               termranks: str, open_bugs_chart: str, pr_close_time_chart: str) -> str:
+               termranks: str, charts: list[str]) -> str:
+        sections = [report]
+        sections.extend(charts)
+        sections.append(termranks)        
         section_sep = '<br>\n<br>\n'
         return f"""<!DOCTYPE html>
 <html lang="en">
@@ -721,7 +734,7 @@ class HTMLFormatter(FormatterABC):
         <title>Repo report for {org}/{repo} on {format_date(now)}</title>
     </head>
     <body>
-    {section_sep.join([open_bugs_chart, pr_close_time_chart, report, termranks])}
+    {section_sep.join(sections)}
     </body>
 </html>"""
     
@@ -756,7 +769,7 @@ class TextFormatter(FormatterABC):
         return ''
          
     def report(self, org: str, repo: str, now: datetime, report: str,
-               termranks: str, open_bugs_chart: str, pr_close_time_chart: str) -> str:
+               termranks: str, charts: list[str]) -> str:
         return report + '\n\n' + termranks
              
 
@@ -815,8 +828,11 @@ class MarkdownFormatter(FormatterABC):
         return f'![]({fname})'                    
 
     def report(self, org: str, repo: str, now: datetime, report: str,
-               termranks: str, open_bugs_chart: str, pr_close_time_chart: str) -> str:
-        return '\n\n'.join([open_bugs_chart, pr_close_time_chart, report, termranks])
+               termranks: str, charts: list[str]) -> str:
+        sections = [report]
+        sections.extend(charts)
+        sections.append(termranks)
+        return '\n\n'.join(sections)
     
 
 def plot_open_bugs(formatter: FormatterABC, start:datetime, end:datetime, issues:list[Issue], who:str, 
@@ -897,6 +913,7 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:list[Issue], member
 
         # TODO: if we get this running daily, we should make it so it only shows new instances that
         # weren't reported before. For now we asterisk those.
+        # TODO: see if the above TODO is still relevant :-)
         for issue in get_subset(issues, members, bug_flag, bug_label):
             if issue.closed_at or issue.number in shown:
                 continue
@@ -1020,15 +1037,18 @@ def get_training_candidates(org: str, repo: str, token: str, members: set[str], 
     return candidates
 
 
-async def get_training_details(candidates: list[int], org: str, repo: str, 
-                               token: str, members: set[str]) -> list[tuple[str,str]]:
+# Yes, I know its a code smell to have 'and' in a function name, but it seems silly to 
+# have to do separate GraphQL queries for these two things.
+
+async def get_issue_bodies_and_first_team_comments(issues: list[int], org: str, repo: str, 
+                             token: str, members: set[str]) -> list[tuple[str,str]]:
     results = []
     dropped = 0
     async with httpx.AsyncClient() as client:
         gh = gidgethub.httpx.GitHubAPI(client, org, oauth_token=token)
-        while candidates:
-            group = candidates[:10]
-            candidates = candidates[10:]
+        while issues:
+            group = issues[:10]
+            issues = issues[10:]
             query = make_issue_query(org, repo, group)
             raw_issues = await gh.graphql(query)                                  
             data = raw_issues['repository']
@@ -1058,13 +1078,16 @@ async def get_training_details(candidates: list[int], org: str, repo: str,
     return results
 
 
-def get_training(org: str, repo: str, token: str, out: str|None=None, verbose: bool = False, \
+def get_training_data(org: str, repo: str, token: str, out: str|None=None, verbose: bool = False, \
                 extra_members: str|None = None, 
                 exclude_labels: list[str]|tuple[str,...] = ('bug', 'enhancement', 'needs-info'), chunk: int=25) -> None:
+    """
+    Get training data for an ML model to predict the first response by a team member to an issue.
+    """
     members = get_team_members(org, repo, token, extra_members, verbose)
     candidates = get_training_candidates(org, repo, token, members, exclude_labels=list(exclude_labels), 
                                          verbose=verbose, chunk=chunk)
-    results = asyncio.run(get_training_details(candidates, org, repo, token, members))
+    results = asyncio.run(get_issue_bodies_and_first_team_comments(candidates, org, repo, token, members))
     print(f'Created {len(results)} training examples')
     result = pd.DataFrame(results, columns=['prompt', 'response']).to_json(orient='records')
     now = datetime.now()
@@ -1130,11 +1153,27 @@ def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5)
     return (formatter.line_separator() * 3).join(report_sections)
 
 
-def median(numbers: list[int]) -> int:
-    sorted_numbers = sorted(numbers)
-    n = len(sorted_numbers)
-    return sorted_numbers[n // 2]
-    
+def calculate_medians(data: list[PullRequest]|list[Issue], 
+                      get_start_date: Callable[[Any], datetime],
+                      get_end_date: Callable[[Any], datetime]) -> dict[str, int]:
+    # Gather the time range for each item and bucket by month
+    months = {}
+    for item in data:
+        start = get_start_date(item)        
+        end = get_end_date(item)
+        if start is None or end is None:
+            continue
+        month = f'{start.year}-{start.month:02}'
+        if month not in months:
+            months[month] = []
+        months[month].append(date_diff(end, start).days)
+
+    # Calculate the medians
+    medians = {}
+    for month, times in months.items():
+        medians[month[2:]] = median(times)    
+    return medians
+
 
 def plot_median_time_to_close_prs(formatter: FormatterABC, 
                                  org: str, repo: str, token: str, verbose: bool=False) -> str:
@@ -1146,27 +1185,31 @@ def plot_median_time_to_close_prs(formatter: FormatterABC,
     since = now - timedelta(days=365)
     pull_requests = get_pull_requests(org, repo, token, state='MERGED', since=since, verbose=verbose)
 
-    # Gather the time to close for each PR and bucket by month
-    months = {}
-    for pr in pull_requests:
-        if pr.merged_at is None:
-            continue
-        month = f'{pr.created_at.year}-{pr.created_at.month:02}'
-        if month not in months:
-            months[month] = []
-        months[month].append(date_diff(pr.merged_at, pr.created_at).days)
-
-    # Calculate the medians
-    medians = {}
-    for month, times in months.items():
-        medians[month[2:]] = median(times)
+    medians = calculate_medians(pull_requests, lambda x: x.created_at, lambda x: x.merged_at)
 
     # Plot the results  
     plot_data(medians, f"Median time to merge PRs for {org}/{repo}", "Month", "Days", width=0.9,
              chart_type='bar')
     return formatter.plot('median_time_to_merge_prs')
 
-        
+
+def plot_median_time_to_close_issues(formatter: FormatterABC,        
+                                    org: str, repo: str, token: str, verbose: bool=False) -> str:
+    """
+    Get all closed issues from the past year, then calculate the median time to close for each month,
+    and return a chart of the results.  
+    """
+    now = datetime.now()
+    since = now - timedelta(days=365)
+    issues = get_issues(org, repo, token, set(), state='CLOSED', since=since, include_comments=False, verbose=verbose)
+
+    medians = calculate_medians(list(issues.values()), lambda x: x.created_at, lambda x: x.closed_at)
+
+    # Plot the results  
+    plot_data(medians, f"Median time to close issues for {org}/{repo}", "Month", "Days", width=0.9,
+             chart_type='bar')
+    return formatter.plot('median_time_to_close_issues')
+
 
 def create_report(org: str, issues_repo: str, token: str,
                   out: str|None=None, as_table:bool=False, verbose: bool=False, 
@@ -1196,12 +1239,17 @@ def create_report(org: str, issues_repo: str, token: str,
     report = find_revisits(now, org, issues_repo, issues, members=members, bug_label=bug_label,
                            formatter=formatter, days=days, stale=stale, show_all=show_all)
 
-    termranks = find_top_terms(issues, formatter)
-    if show_all and fmt != '.txt':
-        open_bugs_chart = plot_open_bugs(formatter, now-timedelta(days=xrange), now,
-                                         issues, issues_repo, [bug_label], interval=1)
-        pr_close_time_chart = plot_median_time_to_close_prs(formatter, org, pr_repo, token, verbose)
+    if show_all:
+        termranks = find_top_terms(issues, formatter)
+        if fmt != '.txt':
+            open_bugs_chart = plot_open_bugs(formatter, now-timedelta(days=xrange), now,
+                                             issues, issues_repo, [bug_label], interval=1)
+            pr_close_time_chart = plot_median_time_to_close_prs(formatter, org, pr_repo, token, verbose)
 
-    result = formatter.report(org, issues_repo, now, report, termranks, open_bugs_chart, pr_close_time_chart)
+            issue_close_time_chart = plot_median_time_to_close_issues(formatter, org, issues_repo,
+                                                                      token, verbose)
+
+    result = formatter.report(org, issues_repo, now, report, termranks, 
+                              [open_bugs_chart, pr_close_time_chart, issue_close_time_chart])
     output_result(out, result, now)
 

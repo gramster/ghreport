@@ -1,5 +1,5 @@
 import os
-from ghreport import create_report,  get_training, get_training_details
+from ghreport import create_report,  get_training_data, get_issue_bodies_and_first_team_comments
 import asyncio
 import pandas as pd
 
