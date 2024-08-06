@@ -88,8 +88,90 @@ def get_members(owner:str, repo:str, token:str) -> set[str]:
     return rtn
 
 
-# Arguments with ! are required.
 issues_with_comments_query = """
+query ($cursor: String, $chunk: Int) {{
+  search(query: "repo:{owner}/{repo} type:issue state:{state} created:>={since}", type:ISSUE, first: $chunk, after: $cursor) {{
+    issueCount
+    pageInfo {{
+      endCursor
+      hasNextPage
+    }}    
+    edges {{
+      node {{
+        ... on Issue {{
+          number
+          title
+          createdAt
+          closedAt        
+          author {{
+            login
+          }}
+          editor {{
+            login
+          }}
+          timelineItems(
+            first: 100
+            itemTypes: [CLOSED_EVENT, LABELED_EVENT, UNLABELED_EVENT, ISSUE_COMMENT]
+          ) {{
+            nodes {{
+              __typename
+              ... on ClosedEvent {{
+                actor {{
+                  login
+                }}
+                createdAt
+              }}
+              ... on LabeledEvent {{
+                label {{
+                  name
+                }}
+                actor {{
+                  login
+                }}
+                createdAt
+              }}
+              ... on UnlabeledEvent {{
+                label {{
+                  name
+                }}
+                actor {{
+                  login
+                }}
+                createdAt
+              }}
+              ... on IssueComment {{
+                author {{
+                  login
+                }}
+                createdAt
+                lastEditedAt
+              }}
+              ... on AssignedEvent {{
+                assignee {{
+                  ... on User {{
+                    login
+                  }}
+                }}
+                createdAt              
+              }}
+              ... on UnassignedEvent {{
+                assignee {{
+                  ... on User {{
+                    login
+                  }}
+                }}
+                createdAt               
+              }}
+            }}
+          }}
+        }}
+      }}
+    }}
+  }}
+}}
+"""
+# Arguments with ! are required.
+issues_with_comments_query_old = """
 query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, $cursor: String, $chunk: Int) {
   rateLimit {
     remaining
@@ -175,8 +257,84 @@ query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, 
 }
 """
 
-# A variant of the above that skips comments and can limit to recent issues.
 issues_without_comments_query = """
+query ($cursor: String, $chunk: Int) {{
+  search(query: "repo:{owner}/{repo} type:issue state:{state} created:>={since}", type:ISSUE first: $chunk, after: $cursor) {{
+    issueCount
+    pageInfo {{
+      endCursor
+      hasNextPage
+    }}    
+    edges {{
+      node {{
+        ... on Issue {{
+          number
+          title
+          createdAt
+          closedAt        
+          author {{
+            login
+          }}
+          editor {{
+            login
+          }}
+          timelineItems(
+            first: 100
+            itemTypes: [CLOSED_EVENT, LABELED_EVENT, UNLABELED_EVENT]
+          ) {{
+            nodes {{
+              __typename
+              ... on ClosedEvent {{
+                actor {{
+                  login
+                }}
+                createdAt
+              }}
+              ... on LabeledEvent {{
+                label {{
+                  name
+                }}
+                actor {{
+                  login
+                }}
+                createdAt
+              }}
+              ... on UnlabeledEvent {{
+                label {{
+                  name
+                }}
+                actor {{
+                  login
+                }}
+                createdAt
+              }}
+              ... on AssignedEvent {{
+                assignee {{
+                  ... on User {{
+                    login
+                  }}
+                }}
+                createdAt              
+              }}
+              ... on UnassignedEvent {{
+                assignee {{
+                  ... on User {{
+                    login
+                  }}
+                }}
+                createdAt               
+              }}
+            }}
+          }}
+        }}
+      }}
+    }}
+  }}
+}}
+"""
+
+# A variant of the above that skips comments and can limit to recent issues.
+issues_without_comments_query_old = """
 query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, $cursor: String, $chunk: Int) {
   rateLimit {
     remaining
@@ -255,12 +413,53 @@ query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, 
 }
 """
 
-# This query gets closed pull requests, so we can calculate the time to merge.
-# Currently it doesn't filter on dates, as PR queries don't support that.
-# Would need to use the GH search API. 
+# These query gets pull requests, so we can calculate the time to merge.
+# We actually seem to need two, as state:merged doesn't seem to work.
+# So one query will get state:STATE PRs, and another will ignore state
+# but look at merged:<DATE.
+
+pull_requests_query = """
+query ($cursor: String, $chunk: Int) {{
+  search(query: "repo:{owner}/{repo} is:pr state:{state} created:>={since}", type:ISSUE, first: $chunk, after: $cursor) {{
+    issueCount
+    pageInfo {{
+      endCursor
+      hasNextPage
+    }}    
+    edges {{
+      node {{
+        ... on PullRequest {{
+          createdAt
+          mergedAt        
+        }}
+      }}
+    }}
+  }}
+}}
+"""
+
+merged_pull_requests_query = """
+query ($cursor: String, $chunk: Int) {{
+  search(query: "repo:{owner}/{repo} is:pr created:>={since} merged:<={until}", type:ISSUE, first: $chunk, after: $cursor) {{
+    issueCount
+    pageInfo {{
+      endCursor
+      hasNextPage
+    }}    
+    edges {{
+      node {{
+        ... on PullRequest {{
+          createdAt
+          mergedAt        
+        }}
+      }}
+    }}
+  }}
+}}
+"""
 
 # Arguments with ! are required.
-pull_requests_query = """
+pull_requests_query_old = """
 query ($owner: String!, $repo: String!, $state: PullRequestState!, $cursor: String, $chunk: Int) {
     rateLimit {
         remaining
@@ -388,8 +587,8 @@ def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
                  events)
 
 
-async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'OPEN', \
-                                chunk:int = 100, since: datetime|None=None,
+async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'open', \
+                                chunk:int = 500, since: datetime|None=None,
                                 verbose:bool = False) -> list[dict]:
     cursor = None
     pull_requests = []
@@ -399,42 +598,37 @@ async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'OPE
     remaining = 0
 
     if since is None:
-        since = datetime.now() - timedelta(days=365*5)
+        since = datetime.now() - timedelta(days=365*10)
 
     # Format the date as required by the GitHub API
-    since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%d')
+    until_str = datetime.now().astimezone(pytz.utc).strftime('%Y-%m-%d')
 
     async with httpx.AsyncClient() as client:
         gh = gidgethub.httpx.GitHubAPI(client, owner,
                                        oauth_token=token)
-        reset_at = None
+        if state == 'merged':
+            query = merged_pull_requests_query.format(owner=owner, repo=repo,
+                                                      since=since_str, until=until_str)
+        else:
+            query = pull_requests_query.format(owner=owner, repo=repo, state=state,
+                                                    since=since_str)
+        
         while True:
-            result = await gh.graphql(pull_requests_query, owner=owner, repo=repo,
-                                    state=state, cursor=cursor, chunk=chunk)
-            limit = result['rateLimit']                
-            reset_at = parse_date(limit['resetAt'])                
-
+            result = await gh.graphql(query, cursor=cursor, chunk=chunk)
+              
             total_requests += 1
-            data = result['repository']['pullRequests']
-            if 'nodes' in data:
-                for pull_request in data['nodes']:
-                    if pull_request['createdAt'] >= since_str:
-                        pull_requests.append(pull_request)
+            data = result['search']
+            if 'edges' in data:
+                for pull_request in data['edges']:
+                    pull_requests.append(pull_request['node'])
 
             if data['pageInfo']['hasNextPage']:
                 cursor = data['pageInfo']['endCursor']
             else:
                 break
-                
-            total_cost += limit['cost']
-            remaining = limit['remaining']
-            
-            if limit['cost'] * 3 > remaining:
-                # Pre-emptively rate limit
-                sleep_time = date_diff(reset_at, datetime.now()).seconds + 1
-                print(f'Fetched {count} PRs of {data["totalCount"]} but need to wait {sleep_time} seconds')
-                await asyncio.sleep(sleep_time)               
- 
+                              
+
     if verbose:
         print(f'GitHub API stats for {repo}:')
         print(f'  Total requests: {total_requests}')
@@ -444,8 +638,8 @@ async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'OPE
     return pull_requests
 
 
-async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'OPEN', \
-                         chunk:int = 25, include_comments: bool = True, 
+async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'open', \
+                         chunk:int = 100, include_comments: bool = True, 
                          since: datetime|None=None, verbose:bool = False) -> list[dict]:
     cursor = None
     issues = []
@@ -455,47 +649,35 @@ async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'OPEN', \
     remaining = 0
 
     if since is None:
-        since = datetime.now() - timedelta(days=365*5)
+        since = datetime.now() - timedelta(days=365*10)
 
     # Format the date as required by the GitHub API
-    since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%d')
 
     async with httpx.AsyncClient() as client:
         gh = gidgethub.httpx.GitHubAPI(client, owner,
                                        oauth_token=token)
         reset_at = None
-        while True:
-            if include_comments:
-                result = await gh.graphql(issues_with_comments_query, owner=owner, repo=repo, 
-                                          state=state, since=since_str,
-                                          cursor=cursor, chunk=chunk)
-            else:
-                result = await gh.graphql(issues_without_comments_query, owner=owner, repo=repo,
-                                        state=state, since=since_str,
-                                        cursor=cursor, chunk=chunk)
-            limit = result['rateLimit']                
-            reset_at = parse_date(limit['resetAt'])                
 
+        if include_comments:
+            query = issues_with_comments_query.format(owner=owner, repo=repo, state=state, since=since_str)
+        else:
+            query = issues_without_comments_query.format(owner=owner, repo=repo, state=state, since=since_str)
+
+        while True:
+            result = await gh.graphql(query, cursor=cursor, chunk=chunk)                
+              
             total_requests += 1
-            data = result['repository']['issues']
-            if 'nodes' in data:
-                for issue in data['nodes']:
-                    issues.append(issue)  # Maybe extend is possible; playing safe
+            data = result['search']
+            if 'edges' in data:
+                for issue in data['edges']:
+                    issues.append(issue['node'])  # Maybe extend is possible; playing safe
 
             if data['pageInfo']['hasNextPage']:
                 cursor = data['pageInfo']['endCursor']
             else:
                 break
-                
-            total_cost += limit['cost']
-            remaining = limit['remaining']
-            
-            if limit['cost'] * 3 > remaining:
-                # Pre-emptively rate limit
-                sleep_time = date_diff(reset_at, datetime.now()).seconds + 1
-                print(f'Fetched {count} issues of {data["totalCount"]} but need to wait {sleep_time} seconds')
-                await asyncio.sleep(sleep_time)               
- 
+                 
     if verbose:
         print(f'GitHub API stats for {repo}:')
         print(f'  Total requests: {total_requests}')
@@ -505,7 +687,7 @@ async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'OPEN', \
     return issues
 
 
-def get_pull_requests(owner:str, repo:str, token:str, state: str='OPEN', \
+def get_pull_requests(owner:str, repo:str, token:str, state: str='open', \
                chunk:int = 100, raw_pull_requests: list[dict[str,str]]|None=None, \
                since: datetime|None=None, verbose:bool = False) -> list[PullRequest]:
     if raw_pull_requests is None:
@@ -524,7 +706,7 @@ def get_pull_requests(owner:str, repo:str, token:str, state: str='OPEN', \
     return pull_requests
 
 
-def get_issues(owner:str, repo:str, token:str, members:set[str], state: str='OPEN', \
+def get_issues(owner:str, repo:str, token:str, members:set[str], state: str='open', \
                chunk:int = 25, raw_issues: list[dict[str,str]]|None=None, \
                include_comments: bool = True, since: datetime|None=None,
                verbose:bool = False) -> dict[str, Issue]:
@@ -638,7 +820,7 @@ def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None,
     ax.set_ylim(0, int(max_y * 1.2 + 1))
 
     # Adjust font size for x-axis labels
-    ax.tick_params(axis='x', labelsize=12)    
+    ax.tick_params(axis='x', labelsize=8)    
     
 
 class FormatterABC(abc.ABC):
@@ -1022,7 +1204,7 @@ def get_training_candidates(org: str, repo: str, token: str, members: set[str], 
                             verbose:bool = False, chunk: int=25) -> list[int]:
     # Get closed issues that are not marked as bugs or feature requests or needing info and were not
     # created by team members.
-    issues = get_issues(org, repo, token, members, state='CLOSED', \
+    issues = get_issues(org, repo, token, members, state='closed', \
                         chunk=chunk, verbose=verbose)
     candidates = []
     for issue in filter_issues(issues.values(), must_exclude_labels=exclude_labels,
@@ -1183,7 +1365,7 @@ def plot_median_time_to_close_prs(formatter: FormatterABC,
     """
     now = datetime.now()
     since = now - timedelta(days=365)
-    pull_requests = get_pull_requests(org, repo, token, state='MERGED', since=since, verbose=verbose)
+    pull_requests = get_pull_requests(org, repo, token, state='merged', since=since, verbose=verbose)
 
     medians = calculate_medians(pull_requests, lambda x: x.created_at, lambda x: x.merged_at)
 
@@ -1201,7 +1383,7 @@ def plot_median_time_to_close_issues(formatter: FormatterABC,
     """
     now = datetime.now()
     since = now - timedelta(days=365)
-    issues = get_issues(org, repo, token, set(), state='CLOSED', since=since, include_comments=False, verbose=verbose)
+    issues = get_issues(org, repo, token, set(), state='closed', since=since, include_comments=False, verbose=verbose)
 
     medians = calculate_medians(list(issues.values()), lambda x: x.created_at, lambda x: x.closed_at)
 
@@ -1233,7 +1415,7 @@ def create_report(org: str, issues_repo: str, token: str,
                 (MarkdownFormatter(as_table, outdir) if fmt == '.md' else \
                  TextFormatter(as_table, outdir))
     members = get_team_members(org, issues_repo, token, extra_members, verbose)
-    issues = list(get_issues(org, issues_repo, token, members, state='OPEN', \
+    issues = list(get_issues(org, issues_repo, token, members, state='open', \
                         chunk=chunk, verbose=verbose).values())   
     now = datetime.now()
     report = find_revisits(now, org, issues_repo, issues, members=members, bug_label=bug_label,
