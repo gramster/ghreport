@@ -1,6 +1,6 @@
 """ghreport - Github report generator. """
 
-__version__ = '0.75'
+__version__ = '0.78'
 
 import os
 import click
@@ -76,8 +76,9 @@ def training(repo, token, out, verbose, team, bug, feat, info, num):
     You normally should not need to use the num argument unless you are experiencing
     timeouts from the GitHub API; in this case you may want to try a lower value.
     """
-    if token == '--':
-        token = os.environ.get('GH_TOKEN') or ''    
+    if token == 'GH_TOKEN':
+        token = os.environ.get('GH_TOKEN')
+    token = str(token)  # make pyright happy
     owner, repo_name = repo.split('/')
     get_training_data(owner, repo_name, token, out, verbose=verbose, extra_members=team, exclude_labels=[bug, feat, info])
 

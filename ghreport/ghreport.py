@@ -1322,6 +1322,9 @@ def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5)
     # Sort issues_with_term by length of list descending
     sorted_terms = sorted(issues_with_term.items(), key=lambda x: len(x[1]), reverse=True)
 
+    if not sorted_terms:
+        return ''
+
     cloud = wordcloud.WordCloud(width=800, height=600, max_words=50,
                                 background_color='white').generate_from_frequencies({k: len(v) for k, v in sorted_terms})
     

@@ -6,5 +6,6 @@ dist/
 *.gz
 *.png
 __pycache__
+junk.md
 
 
