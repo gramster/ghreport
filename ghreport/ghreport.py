@@ -23,9 +23,6 @@ import seaborn as sns
 import wordcloud
 
 
-#plt.style.use('bmh')
-
-
 def median(numbers: list[int]) -> int:
     # Strictly speaking if there are an even number of elelemts in the 
     # list the median is the mean of the two middle elements. But we'll
@@ -522,6 +519,19 @@ def parse_raw_pull_request(pull_request: dict) -> PullRequest | None:
     return PullRequest(created_at, merged_at)
 
 
+def get_active_labels(events: list[Event], at:datetime|None=None) -> set[str]:
+    labels = set()
+    for e in events:
+        if at and e.when > at:
+            break
+        if e.event == 'labeled':
+            labels.add(e.arg)
+        elif e.event == 'unlabeled' and e.arg in labels:
+            labels.remove(e.arg)
+
+    return labels
+    
+
 def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
     try:
         number = issue['number']
@@ -583,8 +593,7 @@ def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
                                          
     return Issue(number, title, created_by, closed_by, created_at, closed_at,        
                  first_team_response_at, last_team_response_at,
-                 last_op_response_at, last_response_at,
-                 events)
+                 last_op_response_at, last_response_at, events)
 
 
 async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'open', \
@@ -751,36 +760,31 @@ def filter_issues(issues: Iterable[Issue],
                 if closed_at < must_be_open_at:
                     continue
                 
-        labels = set()
-        for e in i.events:
-            if must_be_open_at and e.when > must_be_open_at:
-                break
-            if e.event == 'labeled':
-                labels.add(e.arg)
-            elif e.event == 'unlabeled' and e.arg in labels:
-                labels.remove(e.arg)
-        match = True
-        if must_include_labels:
-            if not labels:
-                match = False
-            else:
-                for l in must_include_labels:
-                    if l not in labels:
-                        match = False
-                        break
-        if must_exclude_labels and labels:
-            for l in must_exclude_labels:
-                if l in labels:
-                    match = False
-                    break
-        if not match:
-            continue
+        if must_include_labels or must_exclude_labels:
+          labels = get_active_labels(i.events, at=must_be_open_at)
+          match = True            
+          if must_include_labels:
+              if not labels:
+                  match = False
+              else:
+                  for l in must_include_labels:
+                      if l not in labels:
+                          match = False
+                          break
+          if must_exclude_labels and labels:
+              for l in must_exclude_labels:
+                  if l in labels:
+                      match = False
+                      break
+          if not match:
+              continue
+          
         yield i
 
         
 def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None, 
               width=0.9, chart_type:str='line'):
-    x = sorted([k for k in data.keys()])
+    x = data.keys()  #sorted([k for k in data.keys()])
     y = [data[k] for k in x]
     max_y = max(y) if y else 0
     # Need vbar x param as list of strings else bars aren't centered  
@@ -803,8 +807,12 @@ def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None,
     # Plot the line or bar
     if chart_type == "line":
         ax.plot(x, y, color="navy")
-    else:
+    elif chart_type == "bar":
         ax.bar(x, y, color="navy", width=width)
+    elif chart_type == "barh":
+        ax.barh(x, y, color="navy", height=0.5)
+    else:
+        raise ValueError(f"Unknown chart type {chart_type}")
 
     # Customize grid lines
     ax.grid(True, which='both', linewidth=2)
@@ -813,14 +821,18 @@ def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None,
 
     # Set axis labels and title
     ax.set_title(title, fontsize=16, pad=20)
-    ax.set_xlabel(x_title, fontsize=12, labelpad=15)
-    ax.set_ylabel(y_title, fontsize=12, labelpad=15)
-
-    # Set y-axis range
-    ax.set_ylim(0, int(max_y * 1.2 + 1))
+    if chart_type == "barh":
+        ax.set_ylabel(x_title, fontsize=12, labelpad=15)
+        ax.set_xlabel(y_title, fontsize=12, labelpad=15)
+    else:
+        ax.set_xlabel(x_title, fontsize=12, labelpad=15)
+        ax.set_ylabel(y_title, fontsize=12, labelpad=15)
+        # Set y-axis range
+        ax.set_ylim(0, int(max_y * 1.2 + 1))
 
     # Adjust font size for x-axis labels
     ax.tick_params(axis='x', labelsize=8)    
+    fig.tight_layout()
     
 
 class FormatterABC(abc.ABC):
@@ -1393,6 +1405,24 @@ def plot_median_time_to_close_issues(formatter: FormatterABC,
     return formatter.plot('median_time_to_close_issues')
 
 
+def plot_label_frequencies(formatter: FormatterABC, issues: list[Issue]):
+    """ Get the current label frequencies and plot them. """
+    labelcounts = {}
+    now = utc_to_local(datetime.now())
+    for issue in issues:
+        labels = get_active_labels(issue.events, at=now)
+        for label in labels:
+            if label in labelcounts:
+                labelcounts[label] += 1
+            else:
+                labelcounts[label] = 1
+
+    # Sort the labels by count
+    labelcounts = {k: v for k, v in sorted(labelcounts.items(), key=lambda item: item[1], reverse=True)}
+    plot_data(labelcounts, "Label Frequencies", "Label", "Count", chart_type='barh')
+    return formatter.plot('label_frequencies')
+                       
+                  
 def create_report(org: str, issues_repo: str, token: str,
                   out: str|None=None, as_table:bool=False, verbose: bool=False, 
                   days: int=1, stale: int=30, extra_members: str|None=None,
@@ -1400,7 +1430,9 @@ def create_report(org: str, issues_repo: str, token: str,
                   show_all: bool=False, pr_repo: str|None=None) -> None:
     # Initialize all the outputs here; makes it easy to comment out stuff
     # below when debugging
-    report = termranks = open_bugs_chart = pr_close_time_chart = ''
+    report = termranks = open_bugs_chart = pr_close_time_chart = \
+        issue_close_time_chart = label_frequency_chart = ''
+    
     pr_repo = issues_repo if pr_repo is None else pr_repo
     # Make sure the folder exists for the file specified by out
     outdir = None
@@ -1430,8 +1462,11 @@ def create_report(org: str, issues_repo: str, token: str,
 
             issue_close_time_chart = plot_median_time_to_close_issues(formatter, org, issues_repo,
                                                                       token, verbose)
+            
+            label_frequency_chart = plot_label_frequencies(formatter, issues)
 
     result = formatter.report(org, issues_repo, now, report, termranks, 
-                              [open_bugs_chart, pr_close_time_chart, issue_close_time_chart])
+                              [open_bugs_chart, pr_close_time_chart, issue_close_time_chart,
+                               label_frequency_chart])
     output_result(out, result, now)
 

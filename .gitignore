@@ -4,6 +4,7 @@ dist/
 *.egg-info
 *.egg
 *.gz
+*.png
 __pycache__
 
 
