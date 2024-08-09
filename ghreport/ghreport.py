@@ -23,6 +23,10 @@ import seaborn as sns
 import wordcloud
 
 
+create_debug_log = False
+debug_log = ''
+
+
 def median(numbers: list[int]) -> int:
     # Strictly speaking if there are an even number of elelemts in the 
     # list the median is the mean of the two middle elements. But we'll
@@ -599,6 +603,7 @@ def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
 async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'open', \
                                 chunk:int = 500, since: datetime|None=None,
                                 verbose:bool = False) -> list[dict]:
+    global debug_log
     cursor = None
     pull_requests = []
     count = 0
@@ -624,8 +629,10 @@ async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'ope
                                                     since=since_str)
         
         while True:
-            result = await gh.graphql(query, cursor=cursor, chunk=chunk)
-              
+            result = await gh.graphql(query, cursor=cursor, chunk=chunk)            
+            if create_debug_log:
+                debug_log += f'Query: {query}\n\nRespons: {result}\n\n'
+
             total_requests += 1
             data = result['search']
             if 'edges' in data:
@@ -650,6 +657,7 @@ async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'ope
 async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'open', \
                          chunk:int = 100, include_comments: bool = True, 
                          since: datetime|None=None, verbose:bool = False) -> list[dict]:
+    global debug_log
     cursor = None
     issues = []
     count = 0
@@ -674,7 +682,10 @@ async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'open', \
             query = issues_without_comments_query.format(owner=owner, repo=repo, state=state, since=since_str)
 
         while True:
-            result = await gh.graphql(query, cursor=cursor, chunk=chunk)                
+            result = await gh.graphql(query, cursor=cursor, chunk=chunk)      
+
+            if create_debug_log:
+                debug_log += f'Query: {query}\n\nRespons: {result}\n\n'          
               
             total_requests += 1
             data = result['search']
@@ -859,7 +870,7 @@ class FormatterABC(abc.ABC):
     @abc.abstractmethod
     def report(self, org: str, repo: str, now: datetime, 
                report: str, termranks: str, 
-               charts: list[str]) -> str: ...
+               charts: list[str], debug_log:str='') -> str: ...
 
 
     def day_message(self, team=None, op=None, threep=None) -> str:
@@ -916,10 +927,10 @@ class HTMLFormatter(FormatterABC):
         return f'<img src="data:image/png;base64,{img_base64}">'
     
     def report(self, org: str, repo: str, now: datetime, report: str,
-               termranks: str, charts: list[str]) -> str:
-        sections = [report]
+               termranks: str, charts: list[str], debug_log: str='') -> str:
+        sections = [report, debug_log]
         sections.extend(charts)
-        sections.append(termranks)        
+        sections.append(termranks)
         section_sep = '<br>\n<br>\n'
         return f"""<!DOCTYPE html>
 <html lang="en">
@@ -963,8 +974,8 @@ class TextFormatter(FormatterABC):
         return ''
          
     def report(self, org: str, repo: str, now: datetime, report: str,
-               termranks: str, charts: list[str]) -> str:
-        return report + '\n\n' + termranks
+               termranks: str, charts: list[str], debug_log: str='') -> str:
+        return '\n\n'.join([report, debug_log, termranks])
              
 
 class MarkdownFormatter(FormatterABC):
@@ -1022,8 +1033,8 @@ class MarkdownFormatter(FormatterABC):
         return f'![]({fname})'                    
 
     def report(self, org: str, repo: str, now: datetime, report: str,
-               termranks: str, charts: list[str]) -> str:
-        sections = [report]
+               termranks: str, charts: list[str], debug_log: str = '') -> str:
+        sections = [report, debug_log]
         sections.extend(charts)
         sections.append(termranks)
         return '\n\n'.join(sections)
@@ -1431,6 +1442,8 @@ def create_report(org: str, issues_repo: str, token: str,
                   days: int=1, stale: int=30, extra_members: str|None=None,
                   bug_label: str ='bug', xrange: int=180, chunk: int=25, 
                   show_all: bool=False, pr_repo: str|None=None) -> None:
+    global create_debug_log
+    create_debug_log = False
     # Initialize all the outputs here; makes it easy to comment out stuff
     # below when debugging
     report = termranks = open_bugs_chart = pr_close_time_chart = \
@@ -1470,6 +1483,6 @@ def create_report(org: str, issues_repo: str, token: str,
 
     result = formatter.report(org, issues_repo, now, report, termranks, 
                               [open_bugs_chart, pr_close_time_chart, issue_close_time_chart,
-                               label_frequency_chart])
+                               label_frequency_chart], debug_log)
     output_result(out, result, now)
 
