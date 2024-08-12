@@ -66,6 +66,8 @@ class Issue:
 class PullRequest:
     created_at: datetime 
     merged_at: datetime | None
+    lines_changed: int
+    files_changed: int
 
 
 def get_members(owner:str, repo:str, token:str) -> set[str]:
@@ -433,7 +435,10 @@ query ($cursor: String, $chunk: Int) {{
       node {{
         ... on PullRequest {{
           createdAt
-          mergedAt        
+          mergedAt
+          additions
+          deletions
+          changedFiles        
         }}
       }}
     }}
@@ -453,7 +458,10 @@ query ($cursor: String, $chunk: Int) {{
       node {{
         ... on PullRequest {{
           createdAt
-          mergedAt        
+          mergedAt  
+          additions
+          deletions
+          changedFiles                   
         }}
       }}
     }}
@@ -478,7 +486,10 @@ query ($owner: String!, $repo: String!, $state: PullRequestState!, $cursor: Stri
             }
             nodes {
                 createdAt
-                mergedAt        
+                mergedAt
+                additions
+                deletions
+                changedFiles        
             }
         }
     }
@@ -492,8 +503,8 @@ def utc_to_local(utc_dt: datetime) -> datetime:
     return utc_dt.replace(tzinfo=timezone.utc).astimezone(tz=None)
 
 
-def date_diff(d1: datetime, d2: datetime) -> timedelta:
-    return utc_to_local(d1) - utc_to_local(d2)
+def date_diff(end: datetime, start: datetime) -> timedelta:
+    return utc_to_local(end) - utc_to_local(start)
 
 
 def get_who(obj, prop: str, fallback: str|None = None) -> str:
@@ -518,11 +529,14 @@ def parse_raw_pull_request(pull_request: dict) -> PullRequest | None:
     try:
         created_at: datetime = parse_date(pull_request['createdAt'])
         merged_at: datetime | None = parse_date(pull_request['mergedAt']) if pull_request['mergedAt'] else None
+        additions: int = pull_request['additions']
+        deletions: int = pull_request['deletions']
+        changed_files: int = pull_request['changedFiles']
     except Exception as e:
         print(f'Failed to parse pull_request\n{pull_request}: {e}')
         return None
                                          
-    return PullRequest(created_at, merged_at)
+    return PullRequest(created_at, merged_at, additions+deletions, changed_files)
 
 
 def get_active_labels(events: list[Event], at:datetime|None=None) -> set[str]:
@@ -1396,7 +1410,7 @@ def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5)
 
 def calculate_ranges(data: list[PullRequest]|list[Issue], 
                       get_start_date: Callable[[Any], datetime],
-                      get_end_date: Callable[[Any], datetime],
+                      get_metric: Callable[[Any], int],
                       since: datetime|None = None) -> dict[str, list[int]]:
     # Gather the time range for each item and bucket by month
     if since is not None:
@@ -1404,63 +1418,44 @@ def calculate_ranges(data: list[PullRequest]|list[Issue],
     months = {}
     for item in data:
         start = get_start_date(item)        
-        end = get_end_date(item)
-        if start is None or end is None:
-            continue
         if since is not None and start < since:
             continue
-        month = f'{start.year}-{start.month:02}'[2:]
-        if month not in months:
-            months[month] = []
-        months[month].append(date_diff(end, start).days)
+        try:
+            metric = get_metric(item)
+            month = f'{start.year}-{start.month:02}'[2:]
+            if month not in months:
+                months[month] = []
+            months[month].append(metric)
+        except:
+            pass
+
     return months
 
 
 def calculate_medians(data: list[PullRequest]|list[Issue], 
                       get_start_date: Callable[[Any], datetime],
-                      get_end_date: Callable[[Any], datetime],
+                      get_metric: Callable[[Any], int],
                       since: datetime|None = None) -> dict[str, int]:
-    months = calculate_ranges(data, get_start_date, get_end_date, since)
+    months = calculate_ranges(data, get_start_date, get_metric, since)
     medians = {}
     for month, times in months.items():
         medians[month] = median(times)    
     return medians
 
 
-def plot_time_to_close_prs(formatter: FormatterABC, 
-                                 org: str, repo: str, token: str, verbose: bool=False) -> str:
-    """
-    Get all closed PRs from the past year, then calculate the median time to close for each month,
-    and return a chart of the results.  
-    """
-    now = datetime.now()
-    since = now - timedelta(days=365)
-    pull_requests = get_pull_requests(org, repo, token, state='merged', since=since, verbose=verbose)
-
-    if False:
-        medians = calculate_medians(pull_requests, lambda x: x.created_at, lambda x: x.merged_at)
-        plot_data(medians, f"Median time to merge PRs for {org}/{repo}", "Month", "Days", width=0.9,
-                  chart_type='bar')
-    else:
-        ranges = calculate_ranges(pull_requests, lambda x: x.created_at, lambda x: x.merged_at)
-        plot_ranges(ranges, f"Time to merge PRs for {org}/{repo}", "Month", "Days", width=0.9)
-              
+def plot_time_to_close_prs(formatter: FormatterABC, org: str, repo: str, 
+                           pull_requests: list[PullRequest]) -> str:
+    ranges = calculate_ranges(pull_requests, lambda x: x.created_at, 
+                              lambda x: date_diff(x.merged_at, x.created_at).days)
+    plot_ranges(ranges, f"Time to merge PRs for {org}/{repo}", "Month", "Days", width=0.9)   
     return formatter.plot('time_to_merge_prs')
 
 
 def plot_time_to_close_issues(formatter: FormatterABC,        
                                     org: str, repo: str, issues: list[Issue], verbose: bool=False) -> str:
-    """
-    Get all closed issues from the past year, then calculate the median time to close for each month,
-    and return a chart of the results.  
-    """
-    if False:
-        medians = calculate_medians(issues, lambda x: x.created_at, lambda x: x.closed_at)
-        plot_data(medians, f"Median time to close issues for {org}/{repo}", "Month", "Days", width=0.9,
-                  chart_type='bar')
-    else:
-        ranges = calculate_ranges(issues, lambda x: x.created_at, lambda x: x.closed_at)
-        plot_ranges(ranges, f"Time to close issues for {org}/{repo}", "Month", "Days", width=0.9)
+    ranges = calculate_ranges(issues, lambda x: x.created_at, 
+                                  lambda x: date_diff(x.closed_at, x.created_at).days)
+    plot_ranges(ranges, f"Time to close issues for {org}/{repo}", "Month", "Days", width=0.9)
     return formatter.plot('time_to_close_issues')
 
 
@@ -1470,14 +1465,25 @@ def plot_time_to_first_response(formatter:FormatterABC, org: str, issues_repo: s
     issues = []
     issues.extend(open_issues)
     issues.extend(closed_issues)
-    if False:
-        medians = calculate_medians(issues, lambda x: x.created_at, lambda x: x.first_team_response_at, since=since)
-        plot_data(medians, f"Median time to first team response for {org}/{issues_repo}", "Month", "Days", width=0.9,
-                  chart_type='bar')
-    else:
-        ranges = calculate_ranges(issues, lambda x: x.created_at, lambda x: x.first_team_response_at, since=since)
-        plot_ranges(ranges, f"Time to first team response for {org}/{issues_repo}", "Month", "Days", width=0.9)
+    ranges = calculate_ranges(issues, lambda x: x.created_at, 
+                              lambda x: date_diff(x.first_team_response_at, x.created_at).days,
+                              since=since)
+    plot_ranges(ranges, f"Time to first team response for {org}/{issues_repo}", "Month", "Days", width=0.9)
     return formatter.plot('time_to_first_response')
+
+
+def plot_files_changed_per_pr(formatter: FormatterABC,        
+                              org: str, repo: str, prs: list[PullRequest]) -> str:
+    ranges = calculate_ranges(prs, lambda x: x.created_at, lambda x: x.files_changed)
+    plot_ranges(ranges, f"Files changed per PR for {org}/{repo}", "Month", "Files", width=0.9)
+    return formatter.plot('files_changed_per_pr')
+
+
+def plot_lines_changed_per_pr(formatter: FormatterABC,        
+                              org: str, repo: str, prs: list[PullRequest]) -> str:
+    ranges = calculate_ranges(prs, lambda x: x.created_at, lambda x: x.lines_changed)
+    plot_ranges(ranges, f"Lines changed per PR for {org}/{repo}", "Month", "Lines", width=0.9)
+    return formatter.plot('lines_changed_per_pr')
 
 
 def plot_label_frequencies(formatter: FormatterABC, issues: list[Issue]):
@@ -1532,6 +1538,9 @@ def create_report(org: str, issues_repo: str, token: str,
     since = now - timedelta(days=365)    
     closed_issues = list(get_issues(org, issues_repo, token, members, state='closed',
                                     since=since, verbose=verbose).values())
+    merged_pull_requests = get_pull_requests(org, pr_repo, token, state='merged', since=since,
+                                             verbose=verbose)
+
     report = find_revisits(now, org, issues_repo, open_issues, members=members, bug_label=bug_label,
                            formatter=formatter, days=days, stale=stale, show_all=show_all)
 
@@ -1540,8 +1549,9 @@ def create_report(org: str, issues_repo: str, token: str,
         if fmt != '.txt':
             open_bugs_chart = plot_open_bugs(formatter, now-timedelta(days=xrange), now,
                                              open_issues, issues_repo, [bug_label], interval=1)
-            pr_close_time_chart = plot_time_to_close_prs(formatter, org, pr_repo, token, verbose)
-
+            pr_close_time_chart = plot_time_to_close_prs(formatter, org, pr_repo, merged_pull_requests)
+            files_changed_per_pr_chart = plot_files_changed_per_pr(formatter, org, pr_repo, merged_pull_requests)
+            lines_changed_per_pr_chart = plot_lines_changed_per_pr(formatter, org, pr_repo, merged_pull_requests)
             issue_close_time_chart = plot_time_to_close_issues(formatter, org, issues_repo,
                                                                closed_issues, verbose)
             
@@ -1553,6 +1563,7 @@ def create_report(org: str, issues_repo: str, token: str,
 
     result = formatter.report(org, issues_repo, now, report, termranks, 
                               [open_bugs_chart, pr_close_time_chart, issue_close_time_chart,
-                               first_response_time_chart, label_frequency_chart], debug_log)
+                               first_response_time_chart, label_frequency_chart,
+                               files_changed_per_pr_chart, lines_changed_per_pr_chart], debug_log)
     output_result(out, result, now)
 
