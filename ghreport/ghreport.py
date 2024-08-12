@@ -25,6 +25,8 @@ import wordcloud
 
 create_debug_log = False
 debug_log = ''
+# Set Seaborn style
+sns.set_theme(style="whitegrid")
 
 
 def median(numbers: list[int]) -> int:
@@ -808,9 +810,6 @@ def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None,
     if x_axis_type == "linear":
         x_range = [str(v) for v in x]
         
-    # Set Seaborn style
-    sns.set_theme(style="whitegrid")
-
     # Create the plot
     fig, ax = plt.subplots()
 
@@ -845,9 +844,40 @@ def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None,
         ax.set_ylim(0, int(max_y * 1.2 + 1))
 
     # Adjust font size for x-axis labels
-    ax.tick_params(axis='x', labelsize=8)    
+    ax.tick_params(axis='x', labelsize=8)
     #fig.tight_layout()
     
+
+def plot_ranges(data, title:str, x_title:str, y_title:str, width=0.9):
+    x = sorted([k for k in data.keys()])
+    y = [data[k] for k in x]
+        
+    # Create the plot
+    fig, ax = plt.subplots()
+
+    # Set background color
+    fig.set_facecolor('#efefef')
+    ax.set_facecolor('#efefef')
+
+    ax.boxplot(y, patch_artist=True, showmeans=False, showfliers=False)
+
+    # Customize grid lines
+    ax.grid(True, which='both', linewidth=2)
+    ax.xaxis.grid(False)  # Remove x-axis grid lines
+    ax.yaxis.grid(True, color='white')  # Set y-axis grid lines to white
+
+    # Set axis labels and title
+    ax.set_title(title, fontsize=16, pad=20)
+    ax.set_xlabel(x_title, fontsize=12, labelpad=15)
+    ax.set_ylabel(y_title, fontsize=12, labelpad=15)
+    # Set y-axis range
+    #ax.set_ylim(0, int(max_y * 1.2 + 1))
+
+    # Adjust font size for x-axis labels
+    ax.tick_params(axis='x', labelsize=8)
+    ax.set_xticks(range(len(data)), x)
+    #fig.tight_layout()
+
 
 class FormatterABC(abc.ABC):
     def __init__(self, as_table: bool, outdir: str|None):
@@ -1364,10 +1394,10 @@ def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5)
     return (formatter.line_separator() * 3).join(report_sections)
 
 
-def calculate_medians(data: list[PullRequest]|list[Issue], 
+def calculate_ranges(data: list[PullRequest]|list[Issue], 
                       get_start_date: Callable[[Any], datetime],
                       get_end_date: Callable[[Any], datetime],
-                      since: datetime|None = None) -> dict[str, int]:
+                      since: datetime|None = None) -> dict[str, list[int]]:
     # Gather the time range for each item and bucket by month
     if since is not None:
         since = utc_to_local(since)
@@ -1379,19 +1409,25 @@ def calculate_medians(data: list[PullRequest]|list[Issue],
             continue
         if since is not None and start < since:
             continue
-        month = f'{start.year}-{start.month:02}'
+        month = f'{start.year}-{start.month:02}'[2:]
         if month not in months:
             months[month] = []
         months[month].append(date_diff(end, start).days)
+    return months
 
-    # Calculate the medians
+
+def calculate_medians(data: list[PullRequest]|list[Issue], 
+                      get_start_date: Callable[[Any], datetime],
+                      get_end_date: Callable[[Any], datetime],
+                      since: datetime|None = None) -> dict[str, int]:
+    months = calculate_ranges(data, get_start_date, get_end_date, since)
     medians = {}
     for month, times in months.items():
-        medians[month[2:]] = median(times)    
+        medians[month] = median(times)    
     return medians
 
 
-def plot_median_time_to_close_prs(formatter: FormatterABC, 
+def plot_time_to_close_prs(formatter: FormatterABC, 
                                  org: str, repo: str, token: str, verbose: bool=False) -> str:
     """
     Get all closed PRs from the past year, then calculate the median time to close for each month,
@@ -1401,38 +1437,47 @@ def plot_median_time_to_close_prs(formatter: FormatterABC,
     since = now - timedelta(days=365)
     pull_requests = get_pull_requests(org, repo, token, state='merged', since=since, verbose=verbose)
 
-    medians = calculate_medians(pull_requests, lambda x: x.created_at, lambda x: x.merged_at)
+    if False:
+        medians = calculate_medians(pull_requests, lambda x: x.created_at, lambda x: x.merged_at)
+        plot_data(medians, f"Median time to merge PRs for {org}/{repo}", "Month", "Days", width=0.9,
+                  chart_type='bar')
+    else:
+        ranges = calculate_ranges(pull_requests, lambda x: x.created_at, lambda x: x.merged_at)
+        plot_ranges(ranges, f"Time to merge PRs for {org}/{repo}", "Month", "Days", width=0.9)
+              
+    return formatter.plot('time_to_merge_prs')
 
-    # Plot the results  
-    plot_data(medians, f"Median time to merge PRs for {org}/{repo}", "Month", "Days", width=0.9,
-             chart_type='bar')
-    return formatter.plot('median_time_to_merge_prs')
 
-
-def plot_median_time_to_close_issues(formatter: FormatterABC,        
+def plot_time_to_close_issues(formatter: FormatterABC,        
                                     org: str, repo: str, issues: list[Issue], verbose: bool=False) -> str:
     """
     Get all closed issues from the past year, then calculate the median time to close for each month,
     and return a chart of the results.  
     """
-    medians = calculate_medians(issues, lambda x: x.created_at, lambda x: x.closed_at)
+    if False:
+        medians = calculate_medians(issues, lambda x: x.created_at, lambda x: x.closed_at)
+        plot_data(medians, f"Median time to close issues for {org}/{repo}", "Month", "Days", width=0.9,
+                  chart_type='bar')
+    else:
+        ranges = calculate_ranges(issues, lambda x: x.created_at, lambda x: x.closed_at)
+        plot_ranges(ranges, f"Time to close issues for {org}/{repo}", "Month", "Days", width=0.9)
+    return formatter.plot('time_to_close_issues')
 
-    # Plot the results  
-    plot_data(medians, f"Median time to close issues for {org}/{repo}", "Month", "Days", width=0.9,
-             chart_type='bar')
-    return formatter.plot('median_time_to_close_issues')
 
-
-def plot_median_time_to_first_response(formatter:FormatterABC, org: str, issues_repo: str,
+def plot_time_to_first_response(formatter:FormatterABC, org: str, issues_repo: str,
                                         open_issues: list[Issue], closed_issues: list[Issue], 
                                         since: datetime, verbose: bool = False):
     issues = []
     issues.extend(open_issues)
     issues.extend(closed_issues)
-    medians = calculate_medians(issues, lambda x: x.created_at, lambda x: x.first_team_response_at, since=since)
-    plot_data(medians, f"Median time to first team response for {org}/{issues_repo}", "Month", "Days", width=0.9,
-             chart_type='bar')
-    return formatter.plot('median_time_to_first_response')
+    if False:
+        medians = calculate_medians(issues, lambda x: x.created_at, lambda x: x.first_team_response_at, since=since)
+        plot_data(medians, f"Median time to first team response for {org}/{issues_repo}", "Month", "Days", width=0.9,
+                  chart_type='bar')
+    else:
+        ranges = calculate_ranges(issues, lambda x: x.created_at, lambda x: x.first_team_response_at, since=since)
+        plot_ranges(ranges, f"Time to first team response for {org}/{issues_repo}", "Month", "Days", width=0.9)
+    return formatter.plot('time_to_first_response')
 
 
 def plot_label_frequencies(formatter: FormatterABC, issues: list[Issue]):
@@ -1495,14 +1540,14 @@ def create_report(org: str, issues_repo: str, token: str,
         if fmt != '.txt':
             open_bugs_chart = plot_open_bugs(formatter, now-timedelta(days=xrange), now,
                                              open_issues, issues_repo, [bug_label], interval=1)
-            pr_close_time_chart = plot_median_time_to_close_prs(formatter, org, pr_repo, token, verbose)
+            pr_close_time_chart = plot_time_to_close_prs(formatter, org, pr_repo, token, verbose)
 
-            issue_close_time_chart = plot_median_time_to_close_issues(formatter, org, issues_repo,
-                                                                      closed_issues, verbose)
+            issue_close_time_chart = plot_time_to_close_issues(formatter, org, issues_repo,
+                                                               closed_issues, verbose)
             
-            first_response_time_chart = plot_median_time_to_first_response(formatter, org, issues_repo,
-                                                                      open_issues, closed_issues, since=since,
-                                                                       verbose=verbose)
+            first_response_time_chart = plot_time_to_first_response(formatter, org, issues_repo,
+                                                                    open_issues, closed_issues, since=since,
+                                                                    verbose=verbose)
                         
             label_frequency_chart = plot_label_frequencies(formatter, open_issues)
 
