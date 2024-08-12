@@ -631,7 +631,7 @@ async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'ope
         while True:
             result = await gh.graphql(query, cursor=cursor, chunk=chunk)            
             if create_debug_log:
-                debug_log += f'Query: {query}\n\nRespons: {result}\n\n'
+                debug_log += f'Query: {query}\n\nResponse: {result}\n\n'
 
             total_requests += 1
             data = result['search']
@@ -685,7 +685,7 @@ async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'open', \
             result = await gh.graphql(query, cursor=cursor, chunk=chunk)      
 
             if create_debug_log:
-                debug_log += f'Query: {query}\n\nRespons: {result}\n\n'          
+                debug_log += f'Query: {query}\n\nResponse: {result}\n\n'          
               
             total_requests += 1
             data = result['search']
@@ -794,8 +794,11 @@ def filter_issues(issues: Iterable[Issue],
 
         
 def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None, 
-              width=0.9, chart_type:str='line'):
-    x = data.keys()  #sorted([k for k in data.keys()])
+              width=0.9, chart_type:str='line', sort:bool = True):
+    if sort:
+        x = sorted([k for k in data.keys()])
+    else:
+        x = data.keys()
     y = [data[k] for k in x]
     max_y = max(y) if y else 0
     # Need vbar x param as list of strings else bars aren't centered  
@@ -843,7 +846,7 @@ def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None,
 
     # Adjust font size for x-axis labels
     ax.tick_params(axis='x', labelsize=8)    
-    fig.tight_layout()
+    #fig.tight_layout()
     
 
 class FormatterABC(abc.ABC):
@@ -1363,13 +1366,18 @@ def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5)
 
 def calculate_medians(data: list[PullRequest]|list[Issue], 
                       get_start_date: Callable[[Any], datetime],
-                      get_end_date: Callable[[Any], datetime]) -> dict[str, int]:
+                      get_end_date: Callable[[Any], datetime],
+                      since: datetime|None = None) -> dict[str, int]:
     # Gather the time range for each item and bucket by month
+    if since is not None:
+        since = utc_to_local(since)
     months = {}
     for item in data:
         start = get_start_date(item)        
         end = get_end_date(item)
         if start is None or end is None:
+            continue
+        if since is not None and start < since:
             continue
         month = f'{start.year}-{start.month:02}'
         if month not in months:
@@ -1402,21 +1410,29 @@ def plot_median_time_to_close_prs(formatter: FormatterABC,
 
 
 def plot_median_time_to_close_issues(formatter: FormatterABC,        
-                                    org: str, repo: str, token: str, verbose: bool=False) -> str:
+                                    org: str, repo: str, issues: list[Issue], verbose: bool=False) -> str:
     """
     Get all closed issues from the past year, then calculate the median time to close for each month,
     and return a chart of the results.  
     """
-    now = datetime.now()
-    since = now - timedelta(days=365)
-    issues = get_issues(org, repo, token, set(), state='closed', since=since, include_comments=False, verbose=verbose)
-
-    medians = calculate_medians(list(issues.values()), lambda x: x.created_at, lambda x: x.closed_at)
+    medians = calculate_medians(issues, lambda x: x.created_at, lambda x: x.closed_at)
 
     # Plot the results  
     plot_data(medians, f"Median time to close issues for {org}/{repo}", "Month", "Days", width=0.9,
              chart_type='bar')
     return formatter.plot('median_time_to_close_issues')
+
+
+def plot_median_time_to_first_response(formatter:FormatterABC, org: str, issues_repo: str,
+                                        open_issues: list[Issue], closed_issues: list[Issue], 
+                                        since: datetime, verbose: bool = False):
+    issues = []
+    issues.extend(open_issues)
+    issues.extend(closed_issues)
+    medians = calculate_medians(issues, lambda x: x.created_at, lambda x: x.first_team_response_at, since=since)
+    plot_data(medians, f"Median time to first team response for {org}/{issues_repo}", "Month", "Days", width=0.9,
+             chart_type='bar')
+    return formatter.plot('median_time_to_first_response')
 
 
 def plot_label_frequencies(formatter: FormatterABC, issues: list[Issue]):
@@ -1433,7 +1449,7 @@ def plot_label_frequencies(formatter: FormatterABC, issues: list[Issue]):
 
     # Sort the labels by count
     labelcounts = {k: v for k, v in sorted(labelcounts.items(), key=lambda item: item[1], reverse=True)}
-    plot_data(labelcounts, "Label Frequencies", "Label", "Count", chart_type='barh')
+    plot_data(labelcounts, "Label Frequencies", "Label", "Count", chart_type='barh', sort=False)
     return formatter.plot('label_frequencies')
                        
                   
@@ -1463,26 +1479,35 @@ def create_report(org: str, issues_repo: str, token: str,
                 (MarkdownFormatter(as_table, outdir) if fmt == '.md' else \
                  TextFormatter(as_table, outdir))
     members = get_team_members(org, issues_repo, token, extra_members, verbose)
-    issues = list(get_issues(org, issues_repo, token, members, state='open', \
+    # We get open and closed issues separately, as we only fetch last year of closed issues,
+    # but get all open issues.
+    open_issues = list(get_issues(org, issues_repo, token, members, state='open', \
                         chunk=chunk, verbose=verbose).values())   
     now = datetime.now()
-    report = find_revisits(now, org, issues_repo, issues, members=members, bug_label=bug_label,
+    since = now - timedelta(days=365)    
+    closed_issues = list(get_issues(org, issues_repo, token, members, state='closed',
+                                    since=since, verbose=verbose).values())
+    report = find_revisits(now, org, issues_repo, open_issues, members=members, bug_label=bug_label,
                            formatter=formatter, days=days, stale=stale, show_all=show_all)
 
     if show_all:
-        termranks = find_top_terms(issues, formatter)
+        termranks = find_top_terms(open_issues, formatter)
         if fmt != '.txt':
             open_bugs_chart = plot_open_bugs(formatter, now-timedelta(days=xrange), now,
-                                             issues, issues_repo, [bug_label], interval=1)
+                                             open_issues, issues_repo, [bug_label], interval=1)
             pr_close_time_chart = plot_median_time_to_close_prs(formatter, org, pr_repo, token, verbose)
 
             issue_close_time_chart = plot_median_time_to_close_issues(formatter, org, issues_repo,
-                                                                      token, verbose)
+                                                                      closed_issues, verbose)
             
-            label_frequency_chart = plot_label_frequencies(formatter, issues)
+            first_response_time_chart = plot_median_time_to_first_response(formatter, org, issues_repo,
+                                                                      open_issues, closed_issues, since=since,
+                                                                       verbose=verbose)
+                        
+            label_frequency_chart = plot_label_frequencies(formatter, open_issues)
 
     result = formatter.report(org, issues_repo, now, report, termranks, 
                               [open_bugs_chart, pr_close_time_chart, issue_close_time_chart,
-                               label_frequency_chart], debug_log)
+                               first_response_time_chart, label_frequency_chart], debug_log)
     output_result(out, result, now)
 

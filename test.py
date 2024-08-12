@@ -15,4 +15,7 @@ import pandas as pd
 #             exclude_labels=['bug', 'enhancement', 'waiting for user response'], 
 #             extra_members="+kieferrm,AdamYoblick,eleanorjboyd,kimadeline,judej,jakebailey,rchiodo,gramster,gvanrossum,paulacamargo25,brettcannon,karrtikr,karthiknadig,greazer,heejaechang,StellaHuang95,bschnurr,luabud,ronglums,binderjoe,cwebster-99,debonte,int19h")
 
-create_report("microsoft", "PTVS", os.environ['GH_TOKEN'], out="junk.md", show_all=True, as_table=True)
+
+team = ''
+#create_report("dotnet", "runtime", os.environ['GH_TOKEN'], out="dotnet.md", show_all=True, as_table=True, extra_members=team)
+create_report("microsoft", "debugpy", os.environ['GH_TOKEN'], out="debugpy.md", show_all=True, as_table=True, extra_members=team)
