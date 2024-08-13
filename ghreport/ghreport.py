@@ -68,6 +68,7 @@ class PullRequest:
     merged_at: datetime | None
     lines_changed: int
     files_changed: int
+    files: list[str]
 
 
 def get_members(owner:str, repo:str, token:str) -> set[str]:
@@ -438,7 +439,15 @@ query ($cursor: String, $chunk: Int) {{
           mergedAt
           additions
           deletions
-          changedFiles        
+          changedFiles    
+          files(first: 50) {{
+            nodes {{
+              path
+              additions
+              deletions
+              changeType
+            }}
+          }}              
         }}
       }}
     }}
@@ -461,7 +470,15 @@ query ($cursor: String, $chunk: Int) {{
           mergedAt  
           additions
           deletions
-          changedFiles                   
+          changedFiles   
+          files(first: 50) {{
+            nodes {{
+              path
+              additions
+              deletions
+              changeType
+            }}
+          }}                          
         }}
       }}
     }}
@@ -489,7 +506,15 @@ query ($owner: String!, $repo: String!, $state: PullRequestState!, $cursor: Stri
                 mergedAt
                 additions
                 deletions
-                changedFiles        
+                changedFiles
+                files(first: 100) {
+                  nodes {
+                    path
+                    additions
+                    deletions
+                    changeType
+                  }
+                }                        
             }
         }
     }
@@ -532,11 +557,12 @@ def parse_raw_pull_request(pull_request: dict) -> PullRequest | None:
         additions: int = pull_request['additions']
         deletions: int = pull_request['deletions']
         changed_files: int = pull_request['changedFiles']
+        files: list[str] = [f['path'] for f in pull_request['files']['nodes']]
     except Exception as e:
         print(f'Failed to parse pull_request\n{pull_request}: {e}')
         return None
                                          
-    return PullRequest(created_at, merged_at, additions+deletions, changed_files)
+    return PullRequest(created_at, merged_at, additions+deletions, changed_files, files)
 
 
 def get_active_labels(events: list[Event], at:datetime|None=None) -> set[str]:
@@ -916,7 +942,7 @@ class FormatterABC(abc.ABC):
     def plot(self, name:str|None=None) -> str: ...    
     @abc.abstractmethod
     def report(self, org: str, repo: str, now: datetime, 
-               report: str, termranks: str, 
+               report: str, termranks: str, topfiles: str,
                charts: list[str], debug_log:str='') -> str: ...
 
 
@@ -974,8 +1000,8 @@ class HTMLFormatter(FormatterABC):
         return f'<img src="data:image/png;base64,{img_base64}">'
     
     def report(self, org: str, repo: str, now: datetime, report: str,
-               termranks: str, charts: list[str], debug_log: str='') -> str:
-        sections = [report, debug_log]
+               termranks: str, topfiles: str, charts: list[str], debug_log: str='') -> str:
+        sections = [report, debug_log, topfiles]
         sections.extend(charts)
         sections.append(termranks)
         section_sep = '<br>\n<br>\n'
@@ -1021,8 +1047,8 @@ class TextFormatter(FormatterABC):
         return ''
          
     def report(self, org: str, repo: str, now: datetime, report: str,
-               termranks: str, charts: list[str], debug_log: str='') -> str:
-        return '\n\n'.join([report, debug_log, termranks])
+               termranks: str, topfiles: str, charts: list[str], debug_log: str='') -> str:
+        return '\n\n'.join([report, topfiles, termranks, debug_log])
              
 
 class MarkdownFormatter(FormatterABC):
@@ -1080,8 +1106,8 @@ class MarkdownFormatter(FormatterABC):
         return f'![]({fname})'                    
 
     def report(self, org: str, repo: str, now: datetime, report: str,
-               termranks: str, charts: list[str], debug_log: str = '') -> str:
-        sections = [report, debug_log]
+               termranks: str, topfiles: str, charts: list[str], debug_log: str = '') -> str:
+        sections = [report, debug_log, topfiles]
         sections.extend(charts)
         sections.append(termranks)
         return '\n\n'.join(sections)
@@ -1503,7 +1529,28 @@ def plot_label_frequencies(formatter: FormatterABC, issues: list[Issue]):
     plot_data(labelcounts, "Label Frequencies", "Label", "Count", chart_type='barh', sort=False)
     return formatter.plot('label_frequencies')
                        
-                  
+
+def find_top_files(pull_requests: list[PullRequest], formatter: FormatterABC, min_count:int=5):
+    """ Find the files that are most frequently changed in PRs. """
+    files = {}
+    for pr in pull_requests:
+        for file in pr.files:
+            if file in files:
+                files[file] += 1
+            else:
+                files[file] = 1
+
+    if not files:
+        return ''
+    
+    # Sort files by count, descending, and limit to those with at least min_count occurrences
+    sorted_files = sorted(files.items(), key=lambda x: x[1], reverse=True)
+    sorted_files = [(k, v) for k, v in sorted_files if v >= min_count]
+
+    title = formatter.heading(2, 'MOST FREQUENTLY CHANGED FILES (by # of PRs):')
+    return title + formatter.line_separator().join([f'{v:3d}: {k}' for k, v in sorted_files])
+
+
 def create_report(org: str, issues_repo: str, token: str,
                   out: str|None=None, as_table:bool=False, verbose: bool=False, 
                   days: int=1, stale: int=30, extra_members: str|None=None,
@@ -1546,6 +1593,7 @@ def create_report(org: str, issues_repo: str, token: str,
 
     if show_all:
         termranks = find_top_terms(open_issues, formatter)
+        topfiles = find_top_files(merged_pull_requests, formatter)
         if fmt != '.txt':
             open_bugs_chart = plot_open_bugs(formatter, now-timedelta(days=xrange), now,
                                              open_issues, issues_repo, [bug_label], interval=1)
@@ -1561,7 +1609,7 @@ def create_report(org: str, issues_repo: str, token: str,
                         
             label_frequency_chart = plot_label_frequencies(formatter, open_issues)
 
-    result = formatter.report(org, issues_repo, now, report, termranks, 
+    result = formatter.report(org, issues_repo, now, report, termranks, topfiles,
                               [open_bugs_chart, pr_close_time_chart, issue_close_time_chart,
                                first_response_time_chart, label_frequency_chart,
                                files_changed_per_pr_chart, lines_changed_per_pr_chart], debug_log)

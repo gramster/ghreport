@@ -3,5 +3,4 @@ Other potentially interesting metrics:
 - Number of open non-bug issues
 - Number of pull requests merged per month
 - Number of open pull requests (boxplot)
-- Frequency of file occurrences in pull requests, for files in more than one PR
 
