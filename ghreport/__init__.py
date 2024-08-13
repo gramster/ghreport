@@ -1,6 +1,6 @@
 """ghreport - Github report generator. """
 
-__version__ = '0.83'
+__version__ = '0.84'
 
 import os
 import click
@@ -26,8 +26,8 @@ def cli():
 @click.option('-t', '--team', help='Comma-separated list of extra GitHub user logins to consider as team members.')
 @click.option('-b', '--bug', default='bug', help='The label used to identify issues that are considered bugs.')
 @click.option('-x', '--xrange', default=180, type=int, help='How many days to plot the chart for.')
-@click.option('-n', '--num', default=25, type=int, help='How many issues to fetch per API request.')
-def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange, num):
+@click.option('-p', '--prrepo', type=str, help='Code repo name (if different from issue repo).')
+def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange, prrepo):
     """Generate a report for the given repository.
 
     For reports, output is plain text, unless -o is used and the file name ends in
@@ -41,6 +41,12 @@ def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange
     list from GitHub, and then add the specified users to that list. Getting the list
     from GitHub requires admin read privileges for the token. Without '+', we use just
     the users specified on the command line to define the team members.
+
+    The repo argument should be in the form repo_owner/repo_name. The prrepo argument,
+    if specified, should be just a name; the owner is assumed to be the same as the
+    issue repo. The token argument should be a GitHub token with read access to the
+    repository. If the token is '--', then the GH_TOKEN environment variable will be
+    used.
     """
     
     if token == '--':
@@ -51,7 +57,8 @@ def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange
     if days < 1:
         days = 1
     create_report(owner, repo_name, token, out, as_table=table, verbose=verbose, days=days, \
-                  stale=stale, extra_members=team, bug_label=bug, xrange=xrange, show_all=all)
+                  stale=stale, extra_members=team, bug_label=bug, xrange=xrange, show_all=all, \
+                  pr_repo=prrepo)
 
 
 @cli.command()
@@ -63,8 +70,7 @@ def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange
 @click.option('-b', '--bug', default='bug', help='The label used to identify issues that are considered bugs.')
 @click.option('-f', '--feat', default='feature', help='The label used to identify issues that are considered feature requests.')
 @click.option('-i', '--info', default='needs-info', help='The label used to identify issues that are marked as needing more info.')
-@click.option('-n', '--num', default=25, type=int, help='How many issues to fetch per API request.')
-def training(repo, token, out, verbose, team, bug, feat, info, num):
+def training(repo, token, out, verbose, team, bug, feat, info):
     """Generate training data for fine tuning an LLM responder.
 
     For training, we find issues that are closed and are not tagged as bugs, feature-request

@@ -13,11 +13,6 @@ import pytz
 import httpx
 import gidgethub.httpx
 import matplotlib.pyplot as plt
-#from bokeh.io import export_png
-#from bokeh.plotting import figure, output_file, show, save
-#from bokeh.embed import components
-#from bokeh.models import HoverTool, Range1d, Title
-#from bokeh.io import output_notebook
 import pandas as pd
 import seaborn as sns
 import wordcloud
@@ -660,7 +655,7 @@ async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'ope
     since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%d')
     until_str = datetime.now().astimezone(pytz.utc).strftime('%Y-%m-%d')
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=60) as client:
         gh = gidgethub.httpx.GitHubAPI(client, owner,
                                        oauth_token=token)
         if state == 'merged':
@@ -713,7 +708,7 @@ async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'open', \
     # Format the date as required by the GitHub API
     since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%d')
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=60) as client:
         gh = gidgethub.httpx.GitHubAPI(client, owner,
                                        oauth_token=token)
         reset_at = None
@@ -851,7 +846,11 @@ def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None,
         x_range = [str(v) for v in x]
         
     # Create the plot
-    fig, ax = plt.subplots()
+    if chart_type == "barh":
+        # Allocate enough vertical space for the data
+        fig, ax = plt.subplots(figsize=(8, len(x) * 0.25))
+    else:
+        fig, ax = plt.subplots()
 
     # Set background color
     fig.set_facecolor('#efefef')
@@ -863,7 +862,7 @@ def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None,
     elif chart_type == "bar":
         ax.bar(x, y, color="navy", width=width)
     elif chart_type == "barh":
-        ax.barh(x, y, color="navy", height=0.5)
+        ax.barh(x, y, color="navy", height=0.25)
     else:
         raise ValueError(f"Unknown chart type {chart_type}")
 
@@ -885,7 +884,7 @@ def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None,
 
     # Adjust font size for x-axis labels
     ax.tick_params(axis='x', labelsize=8)
-    #fig.tight_layout()
+    fig.tight_layout()
     
 
 def plot_ranges(data, title:str, x_title:str, y_title:str, width=0.9):
@@ -915,7 +914,7 @@ def plot_ranges(data, title:str, x_title:str, y_title:str, width=0.9):
 
     # Adjust font size for x-axis labels
     ax.tick_params(axis='x', labelsize=8)
-    ax.set_xticks(range(len(data)), x)
+    ax.set_xticks(range(1, 1+len(data)), x)
     #fig.tight_layout()
 
 
@@ -1322,7 +1321,7 @@ async def get_issue_bodies_and_first_team_comments(issues: list[int], org: str, 
                              token: str, members: set[str]) -> list[tuple[str,str]]:
     results = []
     dropped = 0
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=60) as client:
         gh = gidgethub.httpx.GitHubAPI(client, org, oauth_token=token)
         while issues:
             group = issues[:10]
@@ -1372,7 +1371,7 @@ def get_training_data(org: str, repo: str, token: str, out: str|None=None, verbo
     output_result(out, result, now)
 
 
-def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5):
+def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5, verbose: bool = False):
     """
     Find the most common terms in the issue titles. First we remove common words and then
     count the remaining words. We then sort them by count.
@@ -1417,19 +1416,19 @@ def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5)
     cloud_text = formatter.plot('termcloud')
 
     report_sections = [cloud_text]
-    now = datetime.now()
-    for term, issues in sorted_terms:
-        if len(issues) < min_count:
-            break
 
-        report_sections.append(
-            formatter.heading(3, f"Issues with term '{term}'") + \
-            ''.join([(formatter.line(False, '', i, \
-                    op=date_diff(now, i.created_at).days)) for i in issues]) + \
-            formatter.line_separator()
-        )
+    if verbose:
+        now = datetime.now()
+        for term, issues in sorted_terms:
+            if len(issues) < min_count:
+                break
 
-        issues_with_term[term] = len(issues)
+            report_sections.append(
+                formatter.heading(3, f"Issues with term '{term}'") + \
+                ''.join([(formatter.line(False, '', i, \
+                        op=date_diff(now, i.created_at).days)) for i in issues]) + \
+                formatter.line_separator()
+            )
 
     return (formatter.line_separator() * 3).join(report_sections)
 
@@ -1561,7 +1560,9 @@ def create_report(org: str, issues_repo: str, token: str,
     # Initialize all the outputs here; makes it easy to comment out stuff
     # below when debugging
     report = termranks = open_bugs_chart = pr_close_time_chart = \
-        issue_close_time_chart = label_frequency_chart = ''
+        issue_close_time_chart = label_frequency_chart = \
+        files_changed_per_pr_chart = lines_changed_per_pr_chart = \
+        first_response_time_chart = topfiles = ''
     
     pr_repo = issues_repo if pr_repo is None else pr_repo
     # Make sure the folder exists for the file specified by out
@@ -1592,7 +1593,7 @@ def create_report(org: str, issues_repo: str, token: str,
                            formatter=formatter, days=days, stale=stale, show_all=show_all)
 
     if show_all:
-        termranks = find_top_terms(open_issues, formatter)
+        termranks = find_top_terms(open_issues, formatter, verbose=verbose)
         topfiles = find_top_files(merged_pull_requests, formatter)
         if fmt != '.txt':
             open_bugs_chart = plot_open_bugs(formatter, now-timedelta(days=xrange), now,
