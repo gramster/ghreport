@@ -1547,14 +1547,19 @@ def find_top_files(pull_requests: list[PullRequest], formatter: FormatterABC, mi
     sorted_files = [(k, v) for k, v in sorted_files if v >= min_count]
 
     title = formatter.heading(2, 'MOST FREQUENTLY CHANGED FILES (by # of PRs):')
-    return title + formatter.line_separator().join([f'{v:3d}: {k}' for k, v in sorted_files])
+    # Kinda kludgy...
+    as_table = formatter.as_table
+    formatter.as_table = False
+    result = title + formatter.line_separator().join([f'{v:3d}: {k}\n' for k, v in sorted_files])
+    formatter.as_table = as_table
+    return result
 
 
 def create_report(org: str, issues_repo: str, token: str,
                   out: str|None=None, as_table:bool=False, verbose: bool=False, 
                   days: int=1, stale: int=30, extra_members: str|None=None,
                   bug_label: str ='bug', xrange: int=180, chunk: int=25, 
-                  show_all: bool=False, pr_repo: str|None=None) -> None:
+                  show_all: bool=False, pr_repo: str|None=None, hotspots: bool = False) -> None:
     global create_debug_log
     create_debug_log = False
     # Initialize all the outputs here; makes it easy to comment out stuff
@@ -1594,7 +1599,8 @@ def create_report(org: str, issues_repo: str, token: str,
 
     if show_all:
         termranks = find_top_terms(open_issues, formatter, verbose=verbose)
-        topfiles = find_top_files(merged_pull_requests, formatter)
+        if hotspots:
+          topfiles = find_top_files(merged_pull_requests, formatter)
         if fmt != '.txt':
             open_bugs_chart = plot_open_bugs(formatter, now-timedelta(days=xrange), now,
                                              open_issues, issues_repo, [bug_label], interval=1)

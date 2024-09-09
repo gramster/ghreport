@@ -1,6 +1,6 @@
 """ghreport - Github report generator. """
 
-__version__ = '0.84'
+__version__ = '0.89'
 
 import os
 import click
@@ -26,8 +26,9 @@ def cli():
 @click.option('-t', '--team', help='Comma-separated list of extra GitHub user logins to consider as team members.')
 @click.option('-b', '--bug', default='bug', help='The label used to identify issues that are considered bugs.')
 @click.option('-x', '--xrange', default=180, type=int, help='How many days to plot the chart for.')
-@click.option('-p', '--prrepo', type=str, help='Code repo name (if different from issue repo).')
-def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange, prrepo):
+@click.option('-p', '--prrepo', default='', type=str, help='Code repo name (if different from issue repo).')
+@click.option('-h', '--hotspots', is_flag=True, help='Show which source files change most frequently in PRs.')
+def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange, prrepo, hotspots):
     """Generate a report for the given repository.
 
     For reports, output is plain text, unless -o is used and the file name ends in
@@ -56,9 +57,11 @@ def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange
         xrange = 7
     if days < 1:
         days = 1
+    if not prrepo:
+        prrepo = repo_name
     create_report(owner, repo_name, token, out, as_table=table, verbose=verbose, days=days, \
                   stale=stale, extra_members=team, bug_label=bug, xrange=xrange, show_all=all, \
-                  pr_repo=prrepo)
+                  pr_repo=prrepo, hotspots=hotspots)
 
 
 @cli.command()
