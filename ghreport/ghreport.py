@@ -884,7 +884,11 @@ def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None,
 
     # Adjust font size for x-axis labels
     ax.tick_params(axis='x', labelsize=8)
-    fig.tight_layout()
+    try:
+        # This can throw and right now I'm not bothered to figure out why
+        fig.tight_layout()
+    except:
+        pass
     
 
 def plot_ranges(data, title:str, x_title:str, y_title:str, width=0.9):
