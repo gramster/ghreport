@@ -884,7 +884,11 @@ def plot_data(data, title:str, x_title:str, y_title:str, x_axis_type=None,
 
     # Adjust font size for x-axis labels
     ax.tick_params(axis='x', labelsize=8)
-    fig.tight_layout()
+    try:
+        # This can throw and right now I'm not bothered to figure out why
+        fig.tight_layout()
+    except:
+        pass
     
 
 def plot_ranges(data, title:str, x_title:str, y_title:str, width=0.9):
@@ -990,13 +994,16 @@ class HTMLFormatter(FormatterABC):
         return '<br>\n'
     
     def plot(self, name:str|None=None) -> str:
-        # Save the plot to an in-memory buffer
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png')
-        buf.seek(0)
-        # Encode the image to base64
-        img_base64 = base64.b64encode(buf.read()).decode('utf-8')
-        return f'<img src="data:image/png;base64,{img_base64}">'
+        try:
+            # Save the plot to an in-memory buffer
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png')
+            buf.seek(0)
+            # Encode the image to base64
+            img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+            return f'<img src="data:image/png;base64,{img_base64}">'
+        except:
+            return ''
     
     def report(self, org: str, repo: str, now: datetime, report: str,
                termranks: str, topfiles: str, charts: list[str], debug_log: str='') -> str:
@@ -1101,8 +1108,11 @@ class MarkdownFormatter(FormatterABC):
             return ''
         fname = name + '.png'
         dest = os.path.join(self.outdir, fname) if self.outdir is not None else fname
-        plt.savefig(dest)
-        return f'![]({fname})'                    
+        try:
+            plt.savefig(dest)
+            return f'![]({fname})'                    
+        except:
+            return ''
 
     def report(self, org: str, repo: str, now: datetime, report: str,
                termranks: str, topfiles: str, charts: list[str], debug_log: str = '') -> str:
