@@ -68,3 +68,7 @@ flit publish
 0.15 Fix non-async sleep.
 
 0.16 Added ability to get LLM training data.
+
+0.90 Swallow exception from matplotlib
+
+0.91 More robust in the face of matplotlib plot failures

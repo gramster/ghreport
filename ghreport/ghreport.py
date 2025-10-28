@@ -994,13 +994,16 @@ class HTMLFormatter(FormatterABC):
         return '<br>\n'
     
     def plot(self, name:str|None=None) -> str:
-        # Save the plot to an in-memory buffer
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png')
-        buf.seek(0)
-        # Encode the image to base64
-        img_base64 = base64.b64encode(buf.read()).decode('utf-8')
-        return f'<img src="data:image/png;base64,{img_base64}">'
+        try:
+            # Save the plot to an in-memory buffer
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png')
+            buf.seek(0)
+            # Encode the image to base64
+            img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+            return f'<img src="data:image/png;base64,{img_base64}">'
+        except:
+            return ''
     
     def report(self, org: str, repo: str, now: datetime, report: str,
                termranks: str, topfiles: str, charts: list[str], debug_log: str='') -> str:
@@ -1105,8 +1108,11 @@ class MarkdownFormatter(FormatterABC):
             return ''
         fname = name + '.png'
         dest = os.path.join(self.outdir, fname) if self.outdir is not None else fname
-        plt.savefig(dest)
-        return f'![]({fname})'                    
+        try:
+            plt.savefig(dest)
+            return f'![]({fname})'                    
+        except:
+            return ''
 
     def report(self, org: str, repo: str, now: datetime, report: str,
                termranks: str, topfiles: str, charts: list[str], debug_log: str = '') -> str:
