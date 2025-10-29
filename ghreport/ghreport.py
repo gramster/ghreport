@@ -1715,14 +1715,26 @@ def find_pr_activity(now: datetime, owner: str, repo: str,
     """Generate a report of PR activity."""
     repo_path = f'https://github.com/{owner}/{repo}'
     
-    report = formatter.issue_heading(2, 'PULL REQUEST ACTIVITY')
-    
     # Calculate time boundaries
     cutoff = now - timedelta(days=days)
     week_ago = now - timedelta(days=7)
     
     # Newly opened PRs (created in the time period)
     newly_opened = filter_prs_by_time(open_prs + closed_prs, created_after=cutoff)
+    # Newly merged PRs (merged in the time period)
+    newly_merged = filter_prs_by_time(closed_prs, closed_after=cutoff, must_be_merged=True)
+    # Newly closed (but not merged) PRs (closed in the time period without merging)
+    newly_closed = [pr for pr in filter_prs_by_time(closed_prs, closed_after=cutoff, must_be_closed=True)
+                    if pr.merged_at is None]
+    # For weekly reports (days >= 7), show stale open PRs
+    stale_open = filter_prs_by_time(open_prs, created_before=week_ago, must_be_open=True) \
+                     if days >= 7 else []
+
+    if not (newly_opened or newly_merged or newly_closed or stale_open):
+        return ''
+    
+    report = formatter.issue_heading(2, 'PULL REQUEST ACTIVITY')
+    
     if newly_opened:
         report += formatter.pr_heading(3, f'Pull Requests opened in the past {days} day(s):')
         for pr in sorted(newly_opened, key=lambda x: x.created_at, reverse=True):
@@ -1731,8 +1743,6 @@ def find_pr_activity(now: datetime, owner: str, repo: str,
             report += formatter.pr_line(star, repo_path, pr, now=now)
         report += formatter.end_section()
     
-    # Newly merged PRs (merged in the time period)
-    newly_merged = filter_prs_by_time(closed_prs, closed_after=cutoff, must_be_merged=True)
     if newly_merged:
         report += formatter.pr_heading(3, f'Pull Requests merged in the past {days} day(s):')
         for pr in sorted(newly_merged, key=lambda x: x.merged_at or x.closed_at, reverse=True):
@@ -1740,9 +1750,6 @@ def find_pr_activity(now: datetime, owner: str, repo: str,
             report += formatter.pr_line(star, repo_path, pr, pr.merged_at)
         report += formatter.end_section()
     
-    # Newly closed (but not merged) PRs (closed in the time period without merging)
-    newly_closed = [pr for pr in filter_prs_by_time(closed_prs, closed_after=cutoff, must_be_closed=True)
-                    if pr.merged_at is None]
     if newly_closed:
         report += formatter.pr_heading(3, f'Pull Requests closed (not merged) in the past {days} day(s):')
         for pr in sorted(newly_closed, key=lambda x: x.closed_at, reverse=True):
@@ -1751,16 +1758,14 @@ def find_pr_activity(now: datetime, owner: str, repo: str,
         report += formatter.end_section()
     
     # For weekly reports (days >= 7), show stale open PRs
-    if days >= 7:
-        stale_open = filter_prs_by_time(open_prs, created_before=week_ago, must_be_open=True)
-        if stale_open:
-            report += formatter.pr_heading(3, f'Pull Requests still open that were opened more than 7 days ago:')
-            for pr in sorted(stale_open, key=lambda x: x.created_at):
-                days_old = date_diff(now, pr.created_at).days
-                star = days_old > 14  # Mark as important if older than 2 weeks
-                # Pass now to calculate days open for these still-open PRs
-                report += formatter.pr_line(star, repo_path, pr, now=now)
-            report += formatter.end_section()
+    if stale_open:
+        report += formatter.pr_heading(3, f'Pull Requests still open that were opened more than 7 days ago:')
+        for pr in sorted(stale_open, key=lambda x: x.created_at):
+            days_old = date_diff(now, pr.created_at).days
+            star = days_old > 14  # Mark as important if older than 2 weeks
+            # Pass now to calculate days open for these still-open PRs
+            report += formatter.pr_line(star, repo_path, pr, now=now)
+        report += formatter.end_section()
     
     return report
 
@@ -1770,9 +1775,7 @@ def find_closed_issues(now: datetime, owner: str, repo: str,
                        formatter: FormatterABC, days: int = 1) -> str:
     """Generate a report of recently closed issues."""
     repo_path = f'https://github.com/{owner}/{repo}'
-    
-    report = formatter.issue_heading(2, 'RECENTLY CLOSED ISSUES')
-    
+        
     # Calculate time boundary
     cutoff = now - timedelta(days=days)
     
@@ -1783,12 +1786,15 @@ def find_closed_issues(now: datetime, owner: str, repo: str,
             recently_closed.append(issue)
     
     if recently_closed:
+        report = formatter.issue_heading(2, 'RECENTLY CLOSED ISSUES')
         report += formatter.issue_heading(3, f'Issues closed in the past {days} day(s):')
         for issue in sorted(recently_closed, key=lambda x: x.closed_at or x.created_at, reverse=True):
             star = True
             days_open = date_diff(issue.closed_at, issue.created_at).days if issue.closed_at else 0
             report += formatter.issue_line(star, repo_path, issue, team=days_open)
         report += formatter.end_section()
+    else:
+        report = ''
     
     return report
                        
