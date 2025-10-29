@@ -541,10 +541,14 @@ query ($owner: String!, $repo: String!, $state: PullRequestState!, $cursor: Stri
 """
 
 utc=pytz.UTC
+# Define the local timezone; adjust as needed. Because this
+# typically runs from GH actions, we don't want to use the
+# system timezone.
+localtz = pytz.timezone('America/Los_Angeles')
 
 
 def utc_to_local(utc_dt: datetime) -> datetime:
-    return utc_dt.replace(tzinfo=timezone.utc).astimezone(tz=None)
+    return utc_dt.replace(tzinfo=timezone.utc).astimezone(tz=localtz)
 
 
 def date_diff(end: datetime, start: datetime) -> timedelta:
@@ -1290,7 +1294,7 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:list[Issue], member
     for bug_flag in [True, False]:
         top_title = formatter.issue_heading(2, f'FOR ISSUES THAT ARE{"" if bug_flag else " NOT"} MARKED AS BUGS:')
         title_done = False
-        now = datetime.now()
+        now = utc_to_local(datetime.now())
         for issue in get_subset(issues, members, bug_flag, bug_label):
             # has the OP responded after a team member?
             if not issue.closed_at and not issue.last_team_response_at:
@@ -1508,7 +1512,7 @@ def get_training_data(org: str, repo: str, token: str, out: str|None=None, verbo
     results = asyncio.run(get_issue_bodies_and_first_team_comments(candidates, org, repo, token, members))
     print(f'Created {len(results)} training examples')
     result = pd.DataFrame(results, columns=['prompt', 'response']).to_json(orient='records')
-    now = datetime.now()
+    now = utc_to_local(datetime.now())
     output_result(out, result, now)
 
 
@@ -1559,7 +1563,7 @@ def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5,
     report_sections = [cloud_text]
 
     if verbose:
-        now = datetime.now()
+        now = utc_to_local(datetime.now())
         for term, issues in sorted_terms:
             if len(issues) < min_count:
                 break
@@ -1819,9 +1823,12 @@ def create_report(org: str, issues_repo: str, token: str,
                   out: str|None=None, as_table:bool=False, verbose: bool=False, 
                   days: int=1, stale: int=30, extra_members: str|None=None,
                   bug_label: str ='bug', xrange: int=180, chunk: int=25, 
-                  show_all: bool=False, pr_repo: str|None=None, hotspots: bool = False) -> None:
-    global create_debug_log
+                  show_all: bool=False, pr_repo: str|None=None, hotspots: bool = False,
+                  timezone: str = 'America/Los_Angeles') -> None:
+    global create_debug_log, localtz
     create_debug_log = False
+    # Set the timezone
+    localtz = pytz.timezone(timezone)
     # Initialize all the outputs here; makes it easy to comment out stuff
     # below when debugging
     report = termranks = open_bugs_chart = pr_close_time_chart = \
@@ -1847,7 +1854,7 @@ def create_report(org: str, issues_repo: str, token: str,
     # but get all open issues.
     open_issues = list(get_issues(org, issues_repo, token, members, state='open', \
                         chunk=chunk, verbose=verbose).values())   
-    now = datetime.now()
+    now = utc_to_local(datetime.now())
     since = now - timedelta(days=365)    
     closed_issues = list(get_issues(org, issues_repo, token, members, state='closed',
                                     since=since, verbose=verbose).values())

@@ -1,6 +1,6 @@
 """ghreport - Github report generator. """
 
-__version__ = '0.95'
+__version__ = '0.96'
 
 import os
 import click
@@ -28,7 +28,8 @@ def cli():
 @click.option('-x', '--xrange', default=180, type=int, help='How many days to plot the chart for.')
 @click.option('-p', '--prrepo', default='', type=str, help='Code repo name (if different from issue repo).')
 @click.option('-h', '--hotspots', is_flag=True, help='Show which source files change most frequently in PRs.')
-def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange, prrepo, hotspots):
+@click.option('-z', '--timezone', default='America/Los_Angeles', type=str, help='Timezone to use for date/time conversions.')
+def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange, prrepo, hotspots, timezone):
     """Generate a report for the given repository.
 
     For reports, output is plain text, unless -o is used and the file name ends in
@@ -61,7 +62,7 @@ def report(repo, token, out, table, verbose, days, all, stale, team, bug, xrange
         prrepo = repo_name
     create_report(owner, repo_name, token, out, as_table=table, verbose=verbose, days=days, \
                   stale=stale, extra_members=team, bug_label=bug, xrange=xrange, show_all=all, \
-                  pr_repo=prrepo, hotspots=hotspots)
+                  pr_repo=prrepo, hotspots=hotspots, timezone=timezone)
 
 
 @cli.command()
