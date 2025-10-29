@@ -548,7 +548,7 @@ def utc_to_local(utc_dt: datetime) -> datetime:
 
 
 def date_diff(end: datetime, start: datetime) -> timedelta:
-    return utc_to_local(end) - utc_to_local(start)
+    return end - start
 
 
 def get_who(obj, prop: str, fallback: str|None = None) -> str:
@@ -1681,21 +1681,16 @@ def filter_prs_by_time(pull_requests: list[PullRequest],
     """Filter pull requests by time criteria."""
     result = []
     for pr in pull_requests:
-        # Ensure all datetime comparisons use timezone-aware datetimes
-        pr_created = utc_to_local(pr.created_at) if pr.created_at.tzinfo is None else pr.created_at
-        pr_closed = utc_to_local(pr.closed_at) if pr.closed_at and pr.closed_at.tzinfo is None else pr.closed_at
-        pr_merged = utc_to_local(pr.merged_at) if pr.merged_at and pr.merged_at.tzinfo is None else pr.merged_at
-        
         # Check creation time
-        if created_after and pr_created < created_after:
+        if created_after and pr.created_at < created_after:
             continue
-        if created_before and pr_created > created_before:
+        if created_before and pr.created_at > created_before:
             continue
         
         # Check closed time
-        if closed_after and (not pr_closed or pr_closed < closed_after):
+        if closed_after and (not pr.closed_at or pr.closed_at < closed_after):
             continue
-        if closed_before and pr_closed and pr_closed > closed_before:
+        if closed_before and pr.closed_at and pr.closed_at > closed_before:
             continue
             
         # Check state
@@ -1780,11 +1775,8 @@ def find_closed_issues(now: datetime, owner: str, repo: str,
     # Filter issues closed in the time period
     recently_closed = []
     for issue in closed_issues:
-        if issue.closed_at:
-            # Ensure timezone-aware comparison
-            closed_at = utc_to_local(issue.closed_at) if issue.closed_at.tzinfo is None else issue.closed_at
-            if closed_at >= cutoff:
-                recently_closed.append(issue)
+        if issue.closed_at and issue.closed_at >= cutoff:
+            recently_closed.append(issue)
     
     if recently_closed:
         report += formatter.issue_heading(3, f'Issues closed in the past {days} day(s):')
