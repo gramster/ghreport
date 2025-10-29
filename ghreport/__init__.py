@@ -1,6 +1,6 @@
 """ghreport - Github report generator. """
 
-__version__ = '0.93'
+__version__ = '0.94'
 
 import os
 import click
