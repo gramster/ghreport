@@ -709,8 +709,14 @@ async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'open', \
     since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%d')
 
     async with httpx.AsyncClient(timeout=60) as client:
-        gh = gidgethub.httpx.GitHubAPI(client, owner,
+        try:
+            gh = gidgethub.httpx.GitHubAPI(client, owner,
                                        oauth_token=token)
+        except:
+            # do one retry for now
+            gh = gidgethub.httpx.GitHubAPI(client, owner,
+                                       oauth_token=token)            
+            
         reset_at = None
 
         if include_comments:
