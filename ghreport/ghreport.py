@@ -59,8 +59,12 @@ class Issue:
 
 @dataclass
 class PullRequest:
+    number: int
     created_at: datetime 
+    created_by: str
     merged_at: datetime | None
+    closed_at: datetime | None
+    closed_by: str | None
     lines_changed: int
     files_changed: int
     files: list[str]
@@ -430,7 +434,17 @@ query ($cursor: String, $chunk: Int) {{
     edges {{
       node {{
         ... on PullRequest {{
+          number
           createdAt
+          author {{
+            login
+          }}
+          mergedAt
+          mergedBy {{
+            login
+          }}
+          closedAt
+          closed
           mergedAt
           additions
           deletions
@@ -461,7 +475,17 @@ query ($cursor: String, $chunk: Int) {{
     edges {{
       node {{
         ... on PullRequest {{
+          number
           createdAt
+          author {{
+            login
+          }}
+          mergedAt
+          mergedBy {{
+            login
+          }}
+          closedAt
+          closed
           mergedAt  
           additions
           deletions
@@ -517,14 +541,18 @@ query ($owner: String!, $repo: String!, $state: PullRequestState!, $cursor: Stri
 """
 
 utc=pytz.UTC
+# Define the local timezone; adjust as needed. Because this
+# typically runs from GH actions, we don't want to use the
+# system timezone.
+localtz = pytz.timezone('America/Los_Angeles')
 
 
 def utc_to_local(utc_dt: datetime) -> datetime:
-    return utc_dt.replace(tzinfo=timezone.utc).astimezone(tz=None)
+    return utc_dt.replace(tzinfo=timezone.utc).astimezone(tz=localtz)
 
 
 def date_diff(end: datetime, start: datetime) -> timedelta:
-    return utc_to_local(end) - utc_to_local(start)
+    return end - start
 
 
 def get_who(obj, prop: str, fallback: str|None = None) -> str:
@@ -547,8 +575,13 @@ def format_date(d: datetime) -> str:
 
 def parse_raw_pull_request(pull_request: dict) -> PullRequest | None:
     try:
+        number: int = pull_request['number']
         created_at: datetime = parse_date(pull_request['createdAt'])
+        created_by: str = get_who(pull_request, 'author', 'UNKNOWN')
         merged_at: datetime | None = parse_date(pull_request['mergedAt']) if pull_request['mergedAt'] else None
+        closed_at: datetime | None = parse_date(pull_request['closedAt']) if pull_request.get('closedAt') else None
+        # For closed_by, use mergedBy field from GraphQL (works for both merged and closed PRs)
+        closed_by: str | None = get_who(pull_request, 'mergedBy', None) if pull_request.get('mergedBy') else None
         additions: int = pull_request['additions']
         deletions: int = pull_request['deletions']
         changed_files: int = pull_request['changedFiles']
@@ -557,7 +590,8 @@ def parse_raw_pull_request(pull_request: dict) -> PullRequest | None:
         print(f'Failed to parse pull_request\n{pull_request}: {e}')
         return None
                                          
-    return PullRequest(created_at, merged_at, additions+deletions, changed_files, files)
+    return PullRequest(number, created_at, created_by, merged_at, closed_at, closed_by,
+                       additions+deletions, changed_files, files)
 
 
 def get_active_labels(events: list[Event], at:datetime|None=None) -> set[str]:
@@ -934,13 +968,20 @@ class FormatterABC(abc.ABC):
         self.outdir = outdir
 
     @abc.abstractmethod
-    def url(self, repo_path: str, issue: Issue) -> str: ...
+    def issue_url(self, repo_path: str, issue: Issue) -> str: ...
     @abc.abstractmethod
-    def heading(self, level: int, msg: str) -> str: ...
+    def pr_url(self, repo_path: str, pr: PullRequest) -> str: ...
+    @abc.abstractmethod
+    def issue_heading(self, level: int, msg: str) -> str: ...
+    @abc.abstractmethod
+    def pr_heading(self, level: int, msg: str) -> str: ...
     @abc.abstractmethod
     def info(self, msg: str) -> str: ...
     @abc.abstractmethod
-    def line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str: ...
+    def issue_line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str: ...
+    @abc.abstractmethod
+    def pr_line(self, star: bool, repo_path: str, pr: PullRequest, 
+                closed_at: datetime|None = None, now: datetime|None = None) -> str: ...
     @abc.abstractmethod
     def hline(self) -> str: ...
     @abc.abstractmethod
@@ -969,26 +1010,59 @@ class HTMLFormatter(FormatterABC):
     def __init__(self, as_table: bool, outdir: str|None):
         super().__init__(as_table, outdir)
 
-    def url(self, repo_path: str, issue: Issue) -> str:
+    def issue_url(self, repo_path: str, issue: Issue) -> str:
         title = issue.title.replace('"', "&quot;")
         return f'<a title="{title}" href="{repo_path}/issues/{issue.number}">{issue.number}</a>'
+
+    def pr_url(self, repo_path: str, pr: PullRequest) -> str:
+        return f'<a href="{repo_path}/pull/{pr.number}">#{pr.number}</a>'
 
     def info(self, msg: str) -> str:
         return f'<div>{msg}</div>\n'
 
-    def heading(self, level: int, msg: str) -> str:
+    def issue_heading(self, level: int, msg: str) -> str:
         rtn = f'<h{level}>{msg}</h{level}>\n'
         if level == 3 and self.as_table:
             rtn += '<table><tr><th>Days Ago</th><th>URL</th><th>Title</th></tr>\n'
         return rtn
 
-    def line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
+    def pr_heading(self, level: int, msg: str) -> str:
+        rtn = f'<h{level}>{msg}</h{level}>\n'
+        if level == 3 and self.as_table:
+            rtn += '<table><tr><th></th><th>PR</th><th>Created By</th><th>Created</th><th>Days Open</th><th>Closed/Merged</th><th>Closed/Merged By</th></tr>\n'
+        return rtn
+
+    def issue_line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
         days = self.day_message(team=team, op=op, threep=threep)
         if self.as_table:
             days = days[1:-1]  # remove ()
-            return f'<tr><td>{"*" if star else " "}</td><td>{days}</td><td>{self.url(repo_path, issue)}</td><td>{issue.title}</td></tr>\n'
+            return f'<tr><td>{"*" if star else " "}</td><td>{days}</td><td>{self.issue_url(repo_path, issue)}</td><td>{issue.title}</td></tr>\n'
         else:
-            return f'<div>{"*" if star else " "} {days} {self.url(repo_path, issue)}: {issue.title}</div>\n'
+            return f'<div>{"*" if star else " "} {days} {self.issue_url(repo_path, issue)}: {issue.title}</div>\n'
+
+    def pr_line(self, star: bool, repo_path: str, pr: PullRequest, 
+                closed_at: datetime|None = None, now: datetime|None = None) -> str:
+        created_str = format_date(pr.created_at)
+        # Use the passed closed_at or fall back to pr.merged_at or pr.closed_at
+        actual_closed_at = closed_at if closed_at else (pr.merged_at or pr.closed_at)
+        closed_str = format_date(actual_closed_at) if actual_closed_at else '-'
+        closed_by_str = pr.closed_by if pr.closed_by else '-'
+        
+        # Calculate days open
+        if actual_closed_at:
+            days_open = date_diff(actual_closed_at, pr.created_at).days
+        elif now:
+            days_open = date_diff(now, pr.created_at).days
+        else:
+            days_open = None
+        days_open_str = str(days_open) if days_open is not None else '-'
+        
+        if self.as_table:
+            return f'<tr><td>{"*" if star else " "}</td><td>{self.pr_url(repo_path, pr)}</td><td>{pr.created_by}</td><td>{created_str}</td><td>{days_open_str}</td><td>{closed_str}</td><td>{closed_by_str}</td></tr>\n'
+        else:
+            days_msg = f' (open {days_open} days)' if days_open is not None and not actual_closed_at else (f' (was open {days_open} days)' if days_open is not None else '')
+            return f'<div>{"*" if star else " "} {self.pr_url(repo_path, pr)} by {pr.created_by} on {created_str}{days_msg}' + \
+                   (f', closed/merged by {closed_by_str} on {closed_str}' if actual_closed_at else '') + '</div>\n'
 
     def hline(self) -> str:
         return '\n<hr>\n'
@@ -1033,18 +1107,44 @@ class TextFormatter(FormatterABC):
     def __init__(self, as_table: bool, outdir: str|None):
         super().__init__(as_table, outdir)
 
-    def url(self, repo_path: str, issue: Issue) -> str:
+    def issue_url(self, repo_path: str, issue: Issue) -> str:
         return f'{repo_path}/issues/{issue.number}'
+
+    def pr_url(self, repo_path: str, pr: PullRequest) -> str:
+        return f'{repo_path}/pull/{pr.number}'
 
     def info(self, msg: str) -> str:
         return f'\n{msg}\n\n'
 
-    def heading(self, level: int, msg: str) -> str:
+    def issue_heading(self, level: int, msg: str) -> str:
         return f'\n{msg}\n\n'
 
-    def line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
+    def pr_heading(self, level: int, msg: str) -> str:
+        return f'\n{msg}\n\n'
+
+    def issue_line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
         days = self.day_message(team=team, op=op, threep=threep)        
-        return f'{"*" if star else " "} {days} {self.url(repo_path, issue)}: {issue.title}\n'
+        return f'{"*" if star else " "} {days} {self.issue_url(repo_path, issue)}: {issue.title}\n'
+
+    def pr_line(self, star: bool, repo_path: str, pr: PullRequest, 
+                closed_at: datetime|None = None, now: datetime|None = None) -> str:
+        created_str = format_date(pr.created_at)
+        # Use the passed closed_at or fall back to pr.merged_at or pr.closed_at
+        actual_closed_at = closed_at if closed_at else (pr.merged_at or pr.closed_at)
+        closed_str = format_date(actual_closed_at) if actual_closed_at else '-'
+        closed_by_str = pr.closed_by if pr.closed_by else '-'
+        
+        # Calculate days open
+        if actual_closed_at:
+            days_open = date_diff(actual_closed_at, pr.created_at).days
+        elif now:
+            days_open = date_diff(now, pr.created_at).days
+        else:
+            days_open = None
+        days_msg = f' (open {days_open} days)' if days_open is not None and not actual_closed_at else (f' (was open {days_open} days)' if days_open is not None else '')
+        
+        return f'{"*" if star else " "} {self.pr_url(repo_path, pr)} by {pr.created_by} on {created_str}{days_msg}' + \
+               (f', closed/merged by {closed_by_str} on {closed_str}' if actual_closed_at else '') + '\n'
 
     def hline(self) -> str:
         return '================================================================='
@@ -1067,21 +1167,31 @@ class MarkdownFormatter(FormatterABC):
     def __init__(self, as_table: bool, outdir: str|None):
         super().__init__(as_table, outdir)
 
-    def url(self, repo_path: str, issue: Issue) -> str:
+    def issue_url(self, repo_path: str, issue: Issue) -> str:
         link = f'{repo_path}/issues/{issue.number}'
         title = issue.title.replace('"', '&quot;')
         return f'[{issue.number}]({link} "{title}")'
 
+    def pr_url(self, repo_path: str, pr: PullRequest) -> str:
+        link = f'{repo_path}/pull/{pr.number}'
+        return f'[#{pr.number}]({link})'
+
     def info(self, msg: str) -> str:
         return f'\n{msg}\n\n'
 
-    def heading(self, level: int, msg: str) -> str:
+    def issue_heading(self, level: int, msg: str) -> str:
         rtn = f'\n{"#"*level} {msg}\n\n'
         if level == 3 and self.as_table:
             rtn += '| Days Ago | Issue | Title |\n| --- | --- | --- |'
         return rtn
 
-    def line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
+    def pr_heading(self, level: int, msg: str) -> str:
+        rtn = f'\n{"#"*level} {msg}\n\n'
+        if level == 3 and self.as_table:
+            rtn += '| | PR | Created By | Created | Days Open | Closed/Merged | Closed/Merged By |\n| --- | --- | --- | --- | --- | --- | --- |'
+        return rtn
+
+    def issue_line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
         days = self.day_message(team=team, op=op, threep=threep)
         sep = ''
         term = '\n'
@@ -1091,9 +1201,34 @@ class MarkdownFormatter(FormatterABC):
             days = days[1:-1]  # remove ()
 
         if star:
-            return f'\n{sep} \\* {days} {sep}{self.url(repo_path, issue)} {sep if sep else ":"}{issue.title}{sep}{term}'
+            return f'\n{sep} \\* {days} {sep}{self.issue_url(repo_path, issue)} {sep if sep else ":"}{issue.title}{sep}{term}'
         else:
-            return f'\n{sep}  {days} {sep}{self.url(repo_path, issue)}{sep if sep else ":"} {issue.title}{sep}{term}'
+            return f'\n{sep}  {days} {sep}{self.issue_url(repo_path, issue)}{sep if sep else ":"} {issue.title}{sep}{term}'
+
+    def pr_line(self, star: bool, repo_path: str, pr: PullRequest, 
+                closed_at: datetime|None = None, now: datetime|None = None) -> str:
+        created_str = format_date(pr.created_at)
+        # Use the passed closed_at or fall back to pr.merged_at or pr.closed_at
+        actual_closed_at = closed_at if closed_at else (pr.merged_at or pr.closed_at)
+        closed_str = format_date(actual_closed_at) if actual_closed_at else '-'
+        closed_by_str = pr.closed_by if pr.closed_by else '-'
+        
+        # Calculate days open
+        if actual_closed_at:
+            days_open = date_diff(actual_closed_at, pr.created_at).days
+        elif now:
+            days_open = date_diff(now, pr.created_at).days
+        else:
+            days_open = None
+        days_open_str = str(days_open) if days_open is not None else '-'
+        
+        if self.as_table:
+            star_str = '\\*' if star else ' '
+            return f'\n| {star_str} | {self.pr_url(repo_path, pr)} | {pr.created_by} | {created_str} | {days_open_str} | {closed_str} | {closed_by_str} |'
+        else:
+            days_msg = f' (open {days_open} days)' if days_open is not None and not actual_closed_at else (f' (was open {days_open} days)' if days_open is not None else '')
+            return f'\n{"*" if star else " "} {self.pr_url(repo_path, pr)} by {pr.created_by} on {created_str}{days_msg}' + \
+                   (f', closed/merged by {closed_by_str} on {closed_str}' if actual_closed_at else '')
 
     def hline(self) -> str:
         return '\n---\n'
@@ -1154,7 +1289,7 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:list[Issue], member
                   bug_label: str = 'bug', days: int=7, stale: int=30, show_all: bool=False):
     repo_path = f'https://github.com/{owner}/{repo}'
     
-    report = formatter.heading(1, f'GITHUB ISSUES REPORT FOR {owner}/{repo}')
+    report = formatter.issue_heading(1, f'GITHUB ISSUES REPORT FOR {owner}/{repo}')
     report += formatter.info(f'Generated on {format_date(now)} using: stale={stale}, all={show_all}')
     if show_all:
         report += formatter.info(f'* marks items that are new to report in past {days} day(s)')
@@ -1163,9 +1298,9 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:list[Issue], member
 
     shown = set()
     for bug_flag in [True, False]:
-        top_title = formatter.heading(2, f'FOR ISSUES THAT ARE{"" if bug_flag else " NOT"} MARKED AS BUGS:')
+        top_title = formatter.issue_heading(2, f'FOR ISSUES THAT ARE{"" if bug_flag else " NOT"} MARKED AS BUGS:')
         title_done = False
-        now = datetime.now()
+        now = utc_to_local(datetime.now())
         for issue in get_subset(issues, members, bug_flag, bug_label):
             # has the OP responded after a team member?
             if not issue.closed_at and not issue.last_team_response_at:
@@ -1175,10 +1310,10 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:list[Issue], member
                     if not title_done:
                         report += top_title
                         top_title = ''
-                        report += formatter.heading(3, f'Issues in {repo} that need a response from team:')
+                        report += formatter.issue_heading(3, f'Issues in {repo} that need a response from team:')
                         title_done = True
                     shown.add(issue.number)
-                    report += formatter.line(star, repo_path, issue, op=diff)
+                    report += formatter.issue_line(star, repo_path, issue, op=diff)
         if title_done:
             report += formatter.end_section()
             title_done = False
@@ -1195,10 +1330,10 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:list[Issue], member
                     if not title_done:
                         report += top_title
                         top_title = ''
-                        report += formatter.heading(3, f'Issues in {repo} that have comments from OP after last team response:')
+                        report += formatter.issue_heading(3, f'Issues in {repo} that have comments from OP after last team response:')
                         title_done = True 
                     shown.add(issue.number)
-                    report += formatter.line(star, repo_path, issue, op=op_days, team=team_days)
+                    report += formatter.issue_line(star, repo_path, issue, op=op_days, team=team_days)
 
         if title_done:
             report += formatter.end_section()
@@ -1221,10 +1356,10 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:list[Issue], member
                         if not title_done:
                             report += top_title
                             top_title = ''
-                            report += formatter.heading(3, f'Issues in {repo} that have comments from 3rd party after last team response:')
+                            report += formatter.issue_heading(3, f'Issues in {repo} that have comments from 3rd party after last team response:')
                             title_done = True          
                         shown.add(issue.number)
-                        report += formatter.line(star, repo_path, issue, threep=other_days, team=team_days)
+                        report += formatter.issue_line(star, repo_path, issue, threep=other_days, team=team_days)
 
         if title_done:
             report += formatter.end_section()
@@ -1242,10 +1377,10 @@ def find_revisits(now: datetime, owner:str, repo:str, issues:list[Issue], member
                     if not title_done:
                         report += top_title
                         top_title = ''
-                        report += formatter.heading(3, f'Issues in {repo} that have no external responses since team response in {stale}+ days:')
+                        report += formatter.issue_heading(3, f'Issues in {repo} that have no external responses since team response in {stale}+ days:')
                         title_done = True            
                     shown.add(issue.number)
-                    report += formatter.line(star, repo_path, issue, team=diff)
+                    report += formatter.issue_line(star, repo_path, issue, team=diff)
 
         if title_done:
             report += formatter.end_section()
@@ -1383,7 +1518,7 @@ def get_training_data(org: str, repo: str, token: str, out: str|None=None, verbo
     results = asyncio.run(get_issue_bodies_and_first_team_comments(candidates, org, repo, token, members))
     print(f'Created {len(results)} training examples')
     result = pd.DataFrame(results, columns=['prompt', 'response']).to_json(orient='records')
-    now = datetime.now()
+    now = utc_to_local(datetime.now())
     output_result(out, result, now)
 
 
@@ -1434,14 +1569,14 @@ def find_top_terms(issues:list[Issue], formatter: FormatterABC, min_count:int=5,
     report_sections = [cloud_text]
 
     if verbose:
-        now = datetime.now()
+        now = utc_to_local(datetime.now())
         for term, issues in sorted_terms:
             if len(issues) < min_count:
                 break
 
             report_sections.append(
-                formatter.heading(3, f"Issues with term '{term}'") + \
-                ''.join([(formatter.line(False, '', i, \
+                formatter.issue_heading(3, f"Issues with term '{term}'") + \
+                ''.join([(formatter.issue_line(False, '', i, \
                         op=date_diff(now, i.created_at).days)) for i in issues]) + \
                 formatter.line_separator()
             )
@@ -1543,6 +1678,131 @@ def plot_label_frequencies(formatter: FormatterABC, issues: list[Issue]):
     labelcounts = {k: v for k, v in sorted(labelcounts.items(), key=lambda item: item[1], reverse=True)}
     plot_data(labelcounts, "Label Frequencies", "Label", "Count", chart_type='barh', sort=False)
     return formatter.plot('label_frequencies')
+
+
+def filter_prs_by_time(pull_requests: list[PullRequest], 
+                       created_after: datetime | None = None,
+                       created_before: datetime | None = None,
+                       closed_after: datetime | None = None,
+                       closed_before: datetime | None = None,
+                       must_be_open: bool = False,
+                       must_be_closed: bool = False,
+                       must_be_merged: bool = False) -> list[PullRequest]:
+    """Filter pull requests by time criteria."""
+    result = []
+    for pr in pull_requests:
+        # Check creation time
+        if created_after and pr.created_at < created_after:
+            continue
+        if created_before and pr.created_at > created_before:
+            continue
+        
+        # Check closed time
+        if closed_after and (not pr.closed_at or pr.closed_at < closed_after):
+            continue
+        if closed_before and pr.closed_at and pr.closed_at > closed_before:
+            continue
+            
+        # Check state
+        if must_be_open and pr.closed_at is not None:
+            continue
+        if must_be_closed and pr.closed_at is None:
+            continue
+        if must_be_merged and pr.merged_at is None:
+            continue
+            
+        result.append(pr)
+    return result
+
+
+def find_pr_activity(now: datetime, owner: str, repo: str, 
+                     open_prs: list[PullRequest], closed_prs: list[PullRequest],
+                     formatter: FormatterABC, days: int = 1, show_all: bool = False) -> str:
+    """Generate a report of PR activity."""
+    repo_path = f'https://github.com/{owner}/{repo}'
+    
+    # Calculate time boundaries
+    cutoff = now - timedelta(days=days)
+    week_ago = now - timedelta(days=7)
+    
+    # Newly opened PRs (created in the time period)
+    newly_opened = filter_prs_by_time(open_prs + closed_prs, created_after=cutoff)
+    # Newly merged PRs (merged in the time period)
+    newly_merged = filter_prs_by_time(closed_prs, closed_after=cutoff, must_be_merged=True)
+    # Newly closed (but not merged) PRs (closed in the time period without merging)
+    newly_closed = [pr for pr in filter_prs_by_time(closed_prs, closed_after=cutoff, must_be_closed=True)
+                    if pr.merged_at is None]
+    # For weekly reports (days >= 7), show stale open PRs
+    stale_open = filter_prs_by_time(open_prs, created_before=week_ago, must_be_open=True) \
+                     if days >= 7 else []
+
+    if not (newly_opened or newly_merged or newly_closed or stale_open):
+        return ''
+    
+    report = formatter.issue_heading(2, 'PULL REQUEST ACTIVITY')
+    
+    if newly_opened:
+        report += formatter.pr_heading(3, f'Pull Requests opened in the past {days} day(s):')
+        for pr in sorted(newly_opened, key=lambda x: x.created_at, reverse=True):
+            star = True
+            # Pass now to calculate days open for these PRs
+            report += formatter.pr_line(star, repo_path, pr, now=now)
+        report += formatter.end_section()
+    
+    if newly_merged:
+        report += formatter.pr_heading(3, f'Pull Requests merged in the past {days} day(s):')
+        for pr in sorted(newly_merged, key=lambda x: x.merged_at or x.closed_at, reverse=True):
+            star = True
+            report += formatter.pr_line(star, repo_path, pr, pr.merged_at)
+        report += formatter.end_section()
+    
+    if newly_closed:
+        report += formatter.pr_heading(3, f'Pull Requests closed (not merged) in the past {days} day(s):')
+        for pr in sorted(newly_closed, key=lambda x: x.closed_at, reverse=True):
+            star = True
+            report += formatter.pr_line(star, repo_path, pr, pr.closed_at)
+        report += formatter.end_section()
+    
+    # For weekly reports (days >= 7), show stale open PRs
+    if stale_open:
+        report += formatter.pr_heading(3, f'Pull Requests still open that were opened more than 7 days ago:')
+        for pr in sorted(stale_open, key=lambda x: x.created_at):
+            days_old = date_diff(now, pr.created_at).days
+            star = days_old > 14  # Mark as important if older than 2 weeks
+            # Pass now to calculate days open for these still-open PRs
+            report += formatter.pr_line(star, repo_path, pr, now=now)
+        report += formatter.end_section()
+    
+    return report
+
+
+def find_closed_issues(now: datetime, owner: str, repo: str, 
+                       closed_issues: list[Issue], 
+                       formatter: FormatterABC, days: int = 1) -> str:
+    """Generate a report of recently closed issues."""
+    repo_path = f'https://github.com/{owner}/{repo}'
+        
+    # Calculate time boundary
+    cutoff = now - timedelta(days=days)
+    
+    # Filter issues closed in the time period
+    recently_closed = []
+    for issue in closed_issues:
+        if issue.closed_at and issue.closed_at >= cutoff:
+            recently_closed.append(issue)
+    
+    if recently_closed:
+        report = formatter.issue_heading(2, 'RECENTLY CLOSED ISSUES')
+        report += formatter.issue_heading(3, f'Issues closed in the past {days} day(s):')
+        for issue in sorted(recently_closed, key=lambda x: x.closed_at or x.created_at, reverse=True):
+            star = True
+            days_open = date_diff(issue.closed_at, issue.created_at).days if issue.closed_at else 0
+            report += formatter.issue_line(star, repo_path, issue, team=days_open)
+        report += formatter.end_section()
+    else:
+        report = ''
+    
+    return report
                        
 
 def find_top_files(pull_requests: list[PullRequest], formatter: FormatterABC, min_count:int=5):
@@ -1562,7 +1822,7 @@ def find_top_files(pull_requests: list[PullRequest], formatter: FormatterABC, mi
     sorted_files = sorted(files.items(), key=lambda x: x[1], reverse=True)
     sorted_files = [(k, v) for k, v in sorted_files if v >= min_count]
 
-    title = formatter.heading(2, 'MOST FREQUENTLY CHANGED FILES (by # of PRs):')
+    title = formatter.issue_heading(2, 'MOST FREQUENTLY CHANGED FILES (by # of PRs):')
     # Kinda kludgy...
     as_table = formatter.as_table
     formatter.as_table = False
@@ -1575,9 +1835,12 @@ def create_report(org: str, issues_repo: str, token: str,
                   out: str|None=None, as_table:bool=False, verbose: bool=False, 
                   days: int=1, stale: int=30, extra_members: str|None=None,
                   bug_label: str ='bug', xrange: int=180, chunk: int=25, 
-                  show_all: bool=False, pr_repo: str|None=None, hotspots: bool = False) -> None:
-    global create_debug_log
+                  show_all: bool=False, pr_repo: str|None=None, hotspots: bool = False,
+                  timezone: str = 'America/Los_Angeles') -> None:
+    global create_debug_log, localtz
     create_debug_log = False
+    # Set the timezone
+    localtz = pytz.timezone(timezone)
     # Initialize all the outputs here; makes it easy to comment out stuff
     # below when debugging
     report = termranks = open_bugs_chart = pr_close_time_chart = \
@@ -1603,15 +1866,32 @@ def create_report(org: str, issues_repo: str, token: str,
     # but get all open issues.
     open_issues = list(get_issues(org, issues_repo, token, members, state='open', \
                         chunk=chunk, verbose=verbose).values())   
-    now = datetime.now()
+    now = utc_to_local(datetime.now())
     since = now - timedelta(days=365)    
     closed_issues = list(get_issues(org, issues_repo, token, members, state='closed',
                                     since=since, verbose=verbose).values())
+    
+    # Get both open and closed/merged pull requests
+    open_pull_requests = get_pull_requests(org, pr_repo, token, state='open', 
+                                           verbose=verbose)
+    closed_pull_requests = get_pull_requests(org, pr_repo, token, state='closed', since=since,
+                                             verbose=verbose)
     merged_pull_requests = get_pull_requests(org, pr_repo, token, state='merged', since=since,
                                              verbose=verbose)
 
     report = find_revisits(now, org, issues_repo, open_issues, members=members, bug_label=bug_label,
                            formatter=formatter, days=days, stale=stale, show_all=show_all)
+
+    # Add PR activity report
+    pr_report = find_pr_activity(now, org, pr_repo, open_pull_requests, 
+                                 closed_pull_requests + merged_pull_requests,
+                                 formatter, days=days, show_all=show_all)
+    report += pr_report
+
+    # Add closed issues report
+    closed_issues_report = find_closed_issues(now, org, issues_repo, closed_issues,
+                                              formatter, days=days)
+    report += closed_issues_report
 
     if show_all:
         termranks = find_top_terms(open_issues, formatter, verbose=verbose)
