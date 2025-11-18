@@ -177,92 +177,6 @@ query ($cursor: String, $chunk: Int) {{
 }}
 """
 # Arguments with ! are required.
-issues_with_comments_query_old = """
-query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, $cursor: String, $chunk: Int) {
-  rateLimit {
-    remaining
-    cost
-    resetAt
-  }
-  repository(owner: $owner, name: $repo) {
-    issues(states: [$state], first: $chunk, after: $cursor, filterBy: { since: $since }) {
-      totalCount
-      pageInfo {
-        endCursor
-        hasNextPage
-      }
-      nodes {
-        number
-        title
-        createdAt
-        closedAt        
-        author {
-          login
-        }
-        editor {
-          login
-        }
-        timelineItems(
-          first: 100
-          itemTypes: [CLOSED_EVENT, LABELED_EVENT, UNLABELED_EVENT, ISSUE_COMMENT]
-        ) {
-          nodes {
-            __typename
-            ... on ClosedEvent {
-              actor {
-                login
-              }
-              createdAt
-            }
-            ... on LabeledEvent {
-              label {
-                name
-              }
-              actor {
-                login
-              }
-              createdAt
-            }
-            ... on UnlabeledEvent {
-              label {
-                name
-              }
-              actor {
-                login
-              }
-              createdAt
-            }
-            ... on IssueComment {
-              author {
-                login
-              }
-              createdAt
-              lastEditedAt
-            }
-            ... on AssignedEvent {
-              assignee {
-                ... on User {
-                  login
-                }
-              }
-              createdAt              
-            }
-            ... on UnassignedEvent {
-              assignee {
-                ... on User {
-                  login
-                }
-              }
-              createdAt               
-            }
-          }
-        }
-      }
-    }
-  }
-}
-"""
-
 issues_without_comments_query = """
 query ($cursor: String, $chunk: Int) {{
   search(query: "repo:{owner}/{repo} type:issue state:{state} created:>={since}", type:ISSUE first: $chunk, after: $cursor) {{
@@ -339,86 +253,6 @@ query ($cursor: String, $chunk: Int) {{
 }}
 """
 
-# A variant of the above that skips comments and can limit to recent issues.
-issues_without_comments_query_old = """
-query ($owner: String!, $repo: String!, $state: IssueState!, $since: DateTime!, $cursor: String, $chunk: Int) {
-  rateLimit {
-    remaining
-    cost
-    resetAt
-  }
-  repository(owner: $owner, name: $repo) {
-    issues(states: [$state], first: $chunk, after: $cursor, filterBy: { since: $since }) {
-      totalCount
-      pageInfo {
-        endCursor
-        hasNextPage
-      }
-      nodes {
-        number
-        title
-        createdAt
-        closedAt        
-        author {
-          login
-        }
-        editor {
-          login
-        }
-        timelineItems(
-          first: 100
-          itemTypes: [CLOSED_EVENT, LABELED_EVENT, UNLABELED_EVENT]
-        ) {
-          nodes {
-            __typename
-            ... on ClosedEvent {
-              actor {
-                login
-              }
-              createdAt
-            }
-            ... on LabeledEvent {
-              label {
-                name
-              }
-              actor {
-                login
-              }
-              createdAt
-            }
-            ... on UnlabeledEvent {
-              label {
-                name
-              }
-              actor {
-                login
-              }
-              createdAt
-            }
-            ... on AssignedEvent {
-              assignee {
-                ... on User {
-                  login
-                }
-              }
-              createdAt              
-            }
-            ... on UnassignedEvent {
-              assignee {
-                ... on User {
-                  login
-                }
-              }
-              createdAt               
-            }
-          }
-        }
-      }
-    }
-  }
-}
-"""
-
 # These query gets pull requests, so we can calculate the time to merge.
 # We actually seem to need two, as state:merged doesn't seem to work.
 # So one query will get state:STATE PRs, and another will ignore state
@@ -436,6 +270,7 @@ query ($cursor: String, $chunk: Int) {{
       node {{
         ... on PullRequest {{
           number
+          title
           createdAt
           author {{
             login
