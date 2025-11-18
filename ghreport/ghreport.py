@@ -641,7 +641,7 @@ def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
 
 
 async def get_raw_pull_requests(owner:str, repo:str, token:str, state:str = 'open', \
-                                chunk:int = 500, since: datetime|None=None,
+                                chunk:int = 100, since: datetime|None=None,
                                 verbose:bool = False) -> list[dict]:
     global debug_log
     cursor = None
