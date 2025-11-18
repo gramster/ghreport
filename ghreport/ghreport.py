@@ -60,6 +60,7 @@ class Issue:
 @dataclass
 class PullRequest:
     number: int
+    title: str
     created_at: datetime 
     created_by: str
     merged_at: datetime | None
@@ -476,6 +477,7 @@ query ($cursor: String, $chunk: Int) {{
       node {{
         ... on PullRequest {{
           number
+          title
           createdAt
           author {{
             login
@@ -505,40 +507,6 @@ query ($cursor: String, $chunk: Int) {{
 }}
 """
 
-# Arguments with ! are required.
-pull_requests_query_old = """
-query ($owner: String!, $repo: String!, $state: PullRequestState!, $cursor: String, $chunk: Int) {
-    rateLimit {
-        remaining
-        cost
-        resetAt
-    }
-    repository(owner: $owner, name: $repo) {
-        pullRequests(states: [$state], first: $chunk, after: $cursor) {
-            totalCount
-            pageInfo {
-                endCursor
-                hasNextPage
-            }
-            nodes {
-                createdAt
-                mergedAt
-                additions
-                deletions
-                changedFiles
-                files(first: 100) {
-                  nodes {
-                    path
-                    additions
-                    deletions
-                    changeType
-                  }
-                }                        
-            }
-        }
-    }
-}
-"""
 
 utc=pytz.UTC
 # Define the local timezone; adjust as needed. Because this
@@ -576,6 +544,7 @@ def format_date(d: datetime) -> str:
 def parse_raw_pull_request(pull_request: dict) -> PullRequest | None:
     try:
         number: int = pull_request['number']
+        title: str = pull_request['title']
         created_at: datetime = parse_date(pull_request['createdAt'])
         created_by: str = get_who(pull_request, 'author', 'UNKNOWN')
         merged_at: datetime | None = parse_date(pull_request['mergedAt']) if pull_request['mergedAt'] else None
@@ -590,7 +559,7 @@ def parse_raw_pull_request(pull_request: dict) -> PullRequest | None:
         print(f'Failed to parse pull_request\n{pull_request}: {e}')
         return None
                                          
-    return PullRequest(number, created_at, created_by, merged_at, closed_at, closed_by,
+    return PullRequest(number, title, created_at, created_by, merged_at, closed_at, closed_by,
                        additions+deletions, changed_files, files)
 
 
@@ -743,14 +712,8 @@ async def get_raw_issues(owner:str, repo:str, token:str, state:str = 'open', \
     since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%d')
 
     async with httpx.AsyncClient(timeout=60) as client:
-        try:
-            gh = gidgethub.httpx.GitHubAPI(client, owner,
+        gh = gidgethub.httpx.GitHubAPI(client, owner,
                                        oauth_token=token)
-        except:
-            # do one retry for now
-            gh = gidgethub.httpx.GitHubAPI(client, owner,
-                                       oauth_token=token)            
-            
         reset_at = None
 
         if include_comments:
@@ -790,16 +753,22 @@ def get_pull_requests(owner:str, repo:str, token:str, state: str='open', \
     if raw_pull_requests is None:
         # non-Jupyter case
         # Next line won't work in Jupyter; instead we have to get raw issues in 
-        # one cell and then do this in another cell        
-        raw_pull_requests = asyncio.run(get_raw_pull_requests(owner, repo, token, 
+        # one cell and then do this in another cell                                                        
+        try:
+             raw_pull_requests = asyncio.run(get_raw_pull_requests(owner, repo, token, 
                                                 state=state, chunk=chunk, 
                                                 since=since,
-                                                verbose=verbose)) 
+                                                verbose=verbose))
+        except Exception as e:
+            print(f"Error getting pull requests for {owner}/{repo}: {e}")
+            raw_pull_requests = []
+
     pull_requests = []    
     for issue in raw_pull_requests:
         parsed_pull_request = parse_raw_pull_request(issue)
         if parsed_pull_request:
             pull_requests.append(parsed_pull_request)
+
     return pull_requests
 
 
@@ -1029,7 +998,7 @@ class HTMLFormatter(FormatterABC):
     def pr_heading(self, level: int, msg: str) -> str:
         rtn = f'<h{level}>{msg}</h{level}>\n'
         if level == 3 and self.as_table:
-            rtn += '<table><tr><th></th><th>PR</th><th>Created By</th><th>Created</th><th>Days Open</th><th>Closed/Merged</th><th>Closed/Merged By</th></tr>\n'
+            rtn += '<table><tr><th></th><th>PR</th><th>Created By</th><th>Created</th><th>Days Open</th><th>Closed/Merged</th><th>Closed/Merged By</th><th>Title</th></tr>\n'
         return rtn
 
     def issue_line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
@@ -1058,10 +1027,10 @@ class HTMLFormatter(FormatterABC):
         days_open_str = str(days_open) if days_open is not None else '-'
         
         if self.as_table:
-            return f'<tr><td>{"*" if star else " "}</td><td>{self.pr_url(repo_path, pr)}</td><td>{pr.created_by}</td><td>{created_str}</td><td>{days_open_str}</td><td>{closed_str}</td><td>{closed_by_str}</td></tr>\n'
+            return f'<tr><td>{"*" if star else " "}</td><td>{self.pr_url(repo_path, pr)}</td><td>{pr.created_by}</td><td>{created_str}</td><td>{days_open_str}</td><td>{closed_str}</td><td>{closed_by_str}</td><td>{pr.title}</td></tr>\n'
         else:
             days_msg = f' (open {days_open} days)' if days_open is not None and not actual_closed_at else (f' (was open {days_open} days)' if days_open is not None else '')
-            return f'<div>{"*" if star else " "} {self.pr_url(repo_path, pr)} by {pr.created_by} on {created_str}{days_msg}' + \
+            return f'<div>{"*" if star else " "} {self.pr_url(repo_path, pr)}:{pr.title} by {pr.created_by} on {created_str}{days_msg}' + \
                    (f', closed/merged by {closed_by_str} on {closed_str}' if actual_closed_at else '') + '</div>\n'
 
     def hline(self) -> str:
@@ -1143,7 +1112,7 @@ class TextFormatter(FormatterABC):
             days_open = None
         days_msg = f' (open {days_open} days)' if days_open is not None and not actual_closed_at else (f' (was open {days_open} days)' if days_open is not None else '')
         
-        return f'{"*" if star else " "} {self.pr_url(repo_path, pr)} by {pr.created_by} on {created_str}{days_msg}' + \
+        return f'{"*" if star else " "} {self.pr_url(repo_path, pr)}:{pr.title} by {pr.created_by} on {created_str}{days_msg}' + \
                (f', closed/merged by {closed_by_str} on {closed_str}' if actual_closed_at else '') + '\n'
 
     def hline(self) -> str:
@@ -1188,7 +1157,7 @@ class MarkdownFormatter(FormatterABC):
     def pr_heading(self, level: int, msg: str) -> str:
         rtn = f'\n{"#"*level} {msg}\n\n'
         if level == 3 and self.as_table:
-            rtn += '| | PR | Created By | Created | Days Open | Closed/Merged | Closed/Merged By |\n| --- | --- | --- | --- | --- | --- | --- |'
+            rtn += '| | PR | Created By | Created | Days Open | Closed/Merged | Closed/Merged By | Title |\n| --- | --- | --- | --- | --- | --- | --- | --- |'
         return rtn
 
     def issue_line(self, star: bool, repo_path: str, issue: Issue, team=None, op=None, threep=None) -> str:
@@ -1224,10 +1193,10 @@ class MarkdownFormatter(FormatterABC):
         
         if self.as_table:
             star_str = '\\*' if star else ' '
-            return f'\n| {star_str} | {self.pr_url(repo_path, pr)} | {pr.created_by} | {created_str} | {days_open_str} | {closed_str} | {closed_by_str} |'
+            return f'\n| {star_str} | {self.pr_url(repo_path, pr)} | {pr.created_by} | {created_str} | {days_open_str} | {closed_str} | {closed_by_str} | {pr.title} |'
         else:
             days_msg = f' (open {days_open} days)' if days_open is not None and not actual_closed_at else (f' (was open {days_open} days)' if days_open is not None else '')
-            return f'\n{"*" if star else " "} {self.pr_url(repo_path, pr)} by {pr.created_by} on {created_str}{days_msg}' + \
+            return f'\n{"*" if star else " "} {self.pr_url(repo_path, pr)}:{pr.title} by {pr.created_by} on {created_str}{days_msg}' + \
                    (f', closed/merged by {closed_by_str} on {closed_str}' if actual_closed_at else '')
 
     def hline(self) -> str:
@@ -1855,6 +1824,7 @@ def create_report(org: str, issues_repo: str, token: str,
         outdir = os.path.dirname(out)
         if outdir and not os.path.exists(outdir):
             os.makedirs(outdir)
+
     # We don't include label params for feature request/needs info because we don't use them
     # in the report right now, although they might be useful in the future.
     fmt = out[out.rfind('.'):] if out is not None else '.txt'

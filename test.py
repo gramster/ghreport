@@ -17,4 +17,5 @@ import pandas as pd
 
 
 team = ''
-create_report("microsoft", "debugpy", os.environ['GH_TOKEN'], out="_debugpy.md", show_all=True, as_table=True, extra_members=team)
+create_report("microsoft", "debugpy", os.environ['GH_TOKEN'], out="_debugpy.md", show_all=True, \
+              as_table=True, extra_members=team, pr_repo="pyrx")
