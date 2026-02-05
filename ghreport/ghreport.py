@@ -643,13 +643,12 @@ def filter_issues(issues: Iterable[Issue],
         if must_not_be_created_by and i.created_by in must_not_be_created_by:
             continue
         if must_be_open_at:
-            created_at = utc_to_local(i.created_at)
-            if created_at > must_be_open_at:
+            # Timestamps are already in local timezone from parse_date
+            if i.created_at > must_be_open_at:
                 continue
 
             if i.closed_at is not None:
-                closed_at = utc_to_local(i.closed_at)            
-                if closed_at < must_be_open_at:
+                if i.closed_at < must_be_open_at:
                     continue
                 
         if must_include_labels or must_exclude_labels:
@@ -1074,8 +1073,8 @@ def plot_open_bugs(formatter: FormatterABC, start:datetime, end:datetime, issues
     counts = {}
     last = None
     while start < end:
-        start_local = utc_to_local(start)
-        l = filter_issues(issues, must_include_labels, must_exclude_labels, must_be_open_at=start_local)
+        # start is already in local time (from now - timedelta), don't convert it again
+        l = filter_issues(issues, must_include_labels, must_exclude_labels, must_be_open_at=start)
         count = len(list(l))
         counts[start] = count
         start += timedelta(days=interval)
