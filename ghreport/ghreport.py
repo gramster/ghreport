@@ -116,7 +116,7 @@ query ($cursor: String, $chunk: Int) {{
             login
           }}
           timelineItems(
-            first: 1000
+            first: 500
             itemTypes: [CLOSED_EVENT, LABELED_EVENT, UNLABELED_EVENT, ISSUE_COMMENT]
           ) {{
             nodes {{
@@ -199,7 +199,7 @@ query ($cursor: String, $chunk: Int) {{
             login
           }}
           timelineItems(
-            first: 1000
+            first: 500
             itemTypes: [CLOSED_EVENT, LABELED_EVENT, UNLABELED_EVENT]
           ) {{
             nodes {{
