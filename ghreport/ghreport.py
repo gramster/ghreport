@@ -1067,34 +1067,43 @@ class MarkdownFormatter(FormatterABC):
         return '\n\n'.join(sections)
     
 
-def plot_open_bugs(formatter: FormatterABC, start:datetime, end:datetime, issues:list[Issue], who:str, 
-                  must_include_labels:list[str], must_exclude_labels:list[str]|None=None, interval=7) -> str:
-    counts = []
-    dates = []
-    counts = {}
-    last = None
-    while start < end:
-        start_local = utc_to_local(start)
-        l = filter_issues(issues, must_include_labels, must_exclude_labels, must_be_open_at=start_local)
-        count = len(list(l))
-        counts[start] = count
-        start += timedelta(days=interval)
-        last = count
-    plot_data(counts, f"Open bug count for {who}", "Date", "Count", x_axis_type="datetime", width=7)
-    return formatter.plot('bugcount')
+def plot_open_issue_counts(formatter: FormatterABC, start:datetime, end:datetime, issues:list[Issue], who:str, 
+                           bug_labels:list[str], interval=7) -> str:
+    bug_counts = {}
+    issue_counts = {}
+    t = start
+    while t < end:
+        t_local = utc_to_local(t)
+        bugs = filter_issues(issues, must_include_labels=bug_labels, must_be_open_at=t_local)
+        all_issues = filter_issues(issues, must_be_open_at=t_local)
+        bug_counts[t] = len(list(bugs))
+        issue_counts[t] = len(list(all_issues))
+        t += timedelta(days=interval)
 
+    dates = sorted(issue_counts.keys())
+    issue_y = [issue_counts[d] for d in dates]
+    bug_y = [bug_counts[d] for d in dates]
+    max_y = max(issue_y) if issue_y else 0
 
-def plot_open_issues(formatter: FormatterABC, start:datetime, end:datetime, issues:list[Issue], who:str,
-                     must_exclude_labels:list[str]|None=None, interval=7) -> str:
-    counts = {}
-    while start < end:
-        start_local = utc_to_local(start)
-        l = filter_issues(issues, must_exclude_labels=must_exclude_labels, must_be_open_at=start_local)
-        count = len(list(l))
-        counts[start] = count
-        start += timedelta(days=interval)
-    plot_data(counts, f"Open issue count for {who}", "Date", "Count", x_axis_type="datetime", width=7)
-    return formatter.plot('issuecount')
+    fig, ax = plt.subplots()
+    fig.set_facecolor('#efefef')
+    ax.set_facecolor('#efefef')
+    ax.plot(dates, issue_y, color='navy', label='All issues')
+    ax.plot(dates, bug_y, color='crimson', label='Bugs')
+    ax.legend()
+    ax.grid(True, which='both', linewidth=2)
+    ax.xaxis.grid(False)
+    ax.yaxis.grid(True, color='white')
+    ax.set_title(f'Open issue counts for {who}', fontsize=16, pad=20)
+    ax.set_xlabel('Date', fontsize=12, labelpad=15)
+    ax.set_ylabel('Count', fontsize=12, labelpad=15)
+    ax.set_ylim(0, int(max_y * 1.2 + 1))
+    ax.tick_params(axis='x', labelsize=8)
+    try:
+        fig.tight_layout()
+    except:
+        pass
+    return formatter.plot('issuecounts')
 
 
 def get_subset(issues:list[Issue], members: set[str], bug_flag: bool, bug_label: str = 'bug') -> Generator[Issue, None, None]:
@@ -1660,7 +1669,7 @@ def create_report(org: str, issues_repo: str, token: str,
     localtz = pytz.timezone(timezone)
     # Initialize all the outputs here; makes it easy to comment out stuff
     # below when debugging
-    report = termranks = open_bugs_chart = open_issues_chart = pr_close_time_chart = \
+    report = termranks = open_issue_counts_chart = pr_close_time_chart = \
         issue_close_time_chart = label_frequency_chart = \
         files_changed_per_pr_chart = lines_changed_per_pr_chart = \
         first_response_time_chart = topfiles = ''
@@ -1716,10 +1725,8 @@ def create_report(org: str, issues_repo: str, token: str,
         if hotspots:
           topfiles = find_top_files(merged_pull_requests, formatter)
         if fmt != '.txt':
-            open_bugs_chart = plot_open_bugs(formatter, now-timedelta(days=xrange), now,
-                                             open_issues, issues_repo, [bug_label], interval=1)
-            open_issues_chart = plot_open_issues(formatter, now-timedelta(days=xrange), now,
-                                                open_issues, issues_repo, interval=1)
+            open_issue_counts_chart = plot_open_issue_counts(formatter, now-timedelta(days=xrange), now,
+                                                               open_issues, issues_repo, [bug_label], interval=1)
             pr_close_time_chart = plot_time_to_close_prs(formatter, org, pr_repo, merged_pull_requests)
             files_changed_per_pr_chart = plot_files_changed_per_pr(formatter, org, pr_repo, merged_pull_requests)
             lines_changed_per_pr_chart = plot_lines_changed_per_pr(formatter, org, pr_repo, merged_pull_requests)
@@ -1733,7 +1740,7 @@ def create_report(org: str, issues_repo: str, token: str,
             label_frequency_chart = plot_label_frequencies(formatter, open_issues)
 
     result = formatter.report(org, issues_repo, now, report, termranks, topfiles,
-                              [open_bugs_chart, open_issues_chart, pr_close_time_chart,
+                              [open_issue_counts_chart, pr_close_time_chart,
                                issue_close_time_chart, first_response_time_chart,
                                label_frequency_chart, files_changed_per_pr_chart,
                                lines_changed_per_pr_chart], debug_log)
