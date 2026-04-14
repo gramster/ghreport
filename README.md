@@ -15,6 +15,61 @@ Use `ghreport -h` for help.
 
 For an example report, see https://github.com/gramster/ghreport/blob/main/example.md or you can see these in an automated form for my teams at **https://github.com/gramster/python-reports**
 
+## Interactive Dashboard
+
+ghreport includes an interactive web dashboard with multi-repo support, caching, and charts.
+
+### Setup
+
+Install the dashboard dependencies:
+
+```
+pip install ghreport[dashboard]
+```
+
+Create a config file (see `config.example.toml`):
+
+```toml
+[[repos]]
+owner = "microsoft"
+name = "debugpy"
+bug_label = "bug"
+```
+
+### Running
+
+```
+export GH_TOKEN=your_github_token
+ghreport dashboard -c config.toml
+```
+
+The dashboard is available at `http://localhost:8000`. API docs are at `http://localhost:8000/docs`.
+
+Options:
+- `-p, --port` — Port (default: 8000)
+- `-H, --host` — Host (default: 0.0.0.0)
+- `-c, --config` — Path to TOML config file
+
+### Features
+
+- **Multi-repo support** — Track multiple repositories, add/remove from the UI
+- **SQLite caching** — Reduces GitHub API calls with incremental sync
+- **Background sync** — Periodic refresh via APScheduler
+- **Reports** — Issue revisits, PR activity, closed issues (same as CLI)
+- **Charts** — Open issue counts, time to merge/close/respond, label frequency, files/lines changed, top terms
+- **Aggregate views** — Cross-repo summary and charts
+
+### Frontend Development
+
+The frontend is a Vue 3 + Vite SPA in `ghreport/dashboard/frontend/`:
+
+```
+cd ghreport/dashboard/frontend
+npm install
+npm run dev    # Dev server with API proxy to localhost:8000
+npm run build  # Production build to dist/
+```
+
 ## Development
 
 This project uses `flit`. First install `flit`:
@@ -72,3 +127,7 @@ flit publish
 0.90 Swallow exception from matplotlib
 
 0.91 More robust in the face of matplotlib plot failures
+
+1.5 Current CLI version
+
+2.0 Interactive web dashboard (FastAPI + Vue 3), core module extraction, multi-repo support, SQLite caching
