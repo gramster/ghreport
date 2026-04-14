@@ -46,6 +46,18 @@
           </form>
         </div>
       </div>
+
+      <template v-if="summary && summary.repos.length > 1">
+        <h3 style="margin-top: 1.5rem;">Aggregate Charts</h3>
+        <div class="grid">
+          <ChartCard title="Open Issues" :aggregate="true" chart-type="open-issues" />
+          <ChartCard title="Time to Merge" :aggregate="true" chart-type="time-to-merge" />
+          <ChartCard title="Time to Close" :aggregate="true" chart-type="time-to-close" />
+          <ChartCard title="Time to Response" :aggregate="true" chart-type="time-to-response" />
+          <ChartCard title="Label Frequency" :aggregate="true" chart-type="label-frequency" />
+          <ChartCard title="Top Terms" :aggregate="true" chart-type="top-terms" />
+        </div>
+      </template>
     </template>
   </div>
 </template>
@@ -54,6 +66,7 @@
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
 import { useReposStore } from '@/stores/repos'
+import ChartCard from '@/components/ChartCard.vue'
 
 interface RepoSummaryItem {
   owner: string; name: string

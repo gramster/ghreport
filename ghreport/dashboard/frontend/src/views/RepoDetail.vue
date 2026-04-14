@@ -41,14 +41,14 @@
 
       <h3 style="margin-top: 1rem;">Charts</h3>
       <div class="grid">
-        <ChartCard title="Open Issues" :owner="owner" :repo="repo" chart-type="open-issues" />
-        <ChartCard title="Time to Merge" :owner="owner" :repo="repo" chart-type="time-to-merge" />
-        <ChartCard title="Time to Close" :owner="owner" :repo="repo" chart-type="time-to-close" />
-        <ChartCard title="Time to Response" :owner="owner" :repo="repo" chart-type="time-to-response" />
-        <ChartCard title="Label Frequency" :owner="owner" :repo="repo" chart-type="label-frequency" />
-        <ChartCard title="Files Changed/PR" :owner="owner" :repo="repo" chart-type="files-changed" />
-        <ChartCard title="Lines Changed/PR" :owner="owner" :repo="repo" chart-type="lines-changed" />
-        <ChartCard title="Top Terms" :owner="owner" :repo="repo" chart-type="top-terms" />
+        <ChartCard :key="'open-issues-'+syncVersion" title="Open Issues" :owner="owner" :repo="repo" chart-type="open-issues" />
+        <ChartCard :key="'time-to-merge-'+syncVersion" title="Time to Merge" :owner="owner" :repo="repo" chart-type="time-to-merge" />
+        <ChartCard :key="'time-to-close-'+syncVersion" title="Time to Close" :owner="owner" :repo="repo" chart-type="time-to-close" />
+        <ChartCard :key="'time-to-response-'+syncVersion" title="Time to Response" :owner="owner" :repo="repo" chart-type="time-to-response" />
+        <ChartCard :key="'label-frequency-'+syncVersion" title="Label Frequency" :owner="owner" :repo="repo" chart-type="label-frequency" />
+        <ChartCard :key="'files-changed-'+syncVersion" title="Files Changed/PR" :owner="owner" :repo="repo" chart-type="files-changed" />
+        <ChartCard :key="'lines-changed-'+syncVersion" title="Lines Changed/PR" :owner="owner" :repo="repo" chart-type="lines-changed" />
+        <ChartCard :key="'top-terms-'+syncVersion" title="Top Terms" :owner="owner" :repo="repo" chart-type="top-terms" />
       </div>
     </template>
   </div>
@@ -69,6 +69,7 @@ const props = defineProps<{ owner: string; repo: string }>()
 const repoInfo = ref<RepoInfo | null>(null)
 const loading = ref(true)
 const syncing = ref(false)
+const syncVersion = ref(0)
 
 async function load() {
   loading.value = true
@@ -84,6 +85,7 @@ async function triggerSync() {
   syncing.value = true
   try {
     await axios.post(`/api/repos/${props.owner}/${props.repo}/sync`)
+    syncVersion.value++
     await load()
   } finally {
     syncing.value = false

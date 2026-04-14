@@ -19,9 +19,10 @@ import TermList from '@/components/charts/TermList.vue'
 
 const props = defineProps<{
   title: string
-  owner: string
-  repo: string
+  owner?: string
+  repo?: string
   chartType: string
+  aggregate?: boolean
 }>()
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,7 +41,10 @@ const chartComponent = computed(() => {
 
 onMounted(async () => {
   try {
-    const { data } = await axios.get(`/api/repos/${props.owner}/${props.repo}/charts/${props.chartType}`)
+    const url = props.aggregate
+      ? `/api/aggregate/charts/${props.chartType}`
+      : `/api/repos/${props.owner}/${props.repo}/charts/${props.chartType}`
+    const { data } = await axios.get(url)
     chartData.value = data
   } catch (e: unknown) {
     error.value = 'Failed to load chart data'

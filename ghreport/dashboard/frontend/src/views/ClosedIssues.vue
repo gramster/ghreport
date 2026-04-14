@@ -12,7 +12,6 @@
       <label>Window (days):
         <input v-model.number="days" type="number" min="1" style="width: 60px; margin-left: 0.25rem;" />
       </label>
-      <button @click="load" style="margin-left: 0.5rem;">Refresh</button>
     </div>
 
     <div v-if="loading" class="loading">Loading...</div>
@@ -22,7 +21,7 @@
         <thead><tr><th>#</th><th>Title</th><th>By</th><th>Closed</th><th>Closed By</th><th>Days Open</th></tr></thead>
         <tbody>
           <tr v-for="issue in data.issues" :key="issue.number">
-            <td>{{ issue.number }}</td>
+            <td><a :href="`https://github.com/${owner}/${repo}/issues/${issue.number}`" target="_blank">{{ issue.number }}</a></td>
             <td>{{ issue.title }}</td>
             <td>{{ issue.created_by }}</td>
             <td>{{ issue.closed_at }}</td>
@@ -68,4 +67,5 @@ async function load() {
 
 onMounted(load)
 watch(() => [props.owner, props.repo], load)
+watch(days, load)
 </script>

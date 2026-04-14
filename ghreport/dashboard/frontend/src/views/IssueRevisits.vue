@@ -10,7 +10,11 @@
 
     <div v-if="loading" class="loading">Loading...</div>
     <template v-else-if="data">
-      <div v-for="(sectionKey, idx) in ['bugs', 'non_bugs']" :key="idx">
+      <div class="tab-buttons" style="margin-bottom: 1rem;">
+        <button :class="{ active: activeTab === 'bugs' }" @click="activeTab = 'bugs'">Bugs</button>
+        <button :class="{ active: activeTab === 'non_bugs' }" @click="activeTab = 'non_bugs'" style="margin-left: 0.5rem;">Non-Bugs</button>
+      </div>
+      <div v-for="(sectionKey, idx) in [activeTab]" :key="idx">
         <h3>{{ sectionKey === 'bugs' ? 'Bug Issues' : 'Non-Bug Issues' }}</h3>
         <div v-for="(catKey, ci) in ['needs_response', 'op_responded', 'third_party_responded', 'stale']" :key="ci">
           <h4 style="margin-top: 0.75rem;">{{ formatCat(catKey) }} ({{ data.sections[sectionKey]?.[catKey]?.length || 0 }})</h4>
@@ -18,7 +22,7 @@
             <thead><tr><th>#</th><th>Title</th><th>Created By</th><th>Created</th><th></th></tr></thead>
             <tbody>
               <tr v-for="issue in data.sections[sectionKey][catKey]" :key="issue.number">
-                <td>{{ issue.number }}</td>
+                <td><a :href="`https://github.com/${owner}/${repo}/issues/${issue.number}`" target="_blank">{{ issue.number }}</a></td>
                 <td>{{ issue.title }}</td>
                 <td>{{ issue.created_by }}</td>
                 <td>{{ issue.created_at }}</td>
@@ -49,6 +53,7 @@ interface RevisitsData {
 const props = defineProps<{ owner: string; repo: string }>()
 const data = ref<RevisitsData | null>(null)
 const loading = ref(true)
+const activeTab = ref<'bugs' | 'non_bugs'>('bugs')
 
 function formatCat(key: string): string {
   return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
@@ -69,3 +74,18 @@ async function load() {
 onMounted(load)
 watch(() => [props.owner, props.repo], load)
 </script>
+
+<style scoped>
+.tab-buttons button {
+  padding: 0.4rem 1rem;
+  border: 1px solid #e1e4e8;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+.tab-buttons button.active {
+  background: #0366d6;
+  color: #fff;
+  border-color: #0366d6;
+}
+</style>

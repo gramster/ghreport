@@ -167,7 +167,7 @@ query ($cursor: String, $chunk: Int) {{
 
 pull_requests_query = """
 query ($cursor: String, $chunk: Int) {{
-  search(query: "repo:{owner}/{repo} is:pr state:{state} created:>={since}", type:ISSUE, first: $chunk, after: $cursor) {{
+  search(query: "repo:{owner}/{repo} is:pr state:{state} {since_filter}", type:ISSUE, first: $chunk, after: $cursor) {{
     issueCount
     pageInfo {{
       endCursor
@@ -209,7 +209,7 @@ query ($cursor: String, $chunk: Int) {{
 
 merged_pull_requests_query = """
 query ($cursor: String, $chunk: Int) {{
-  search(query: "repo:{owner}/{repo} is:pr created:>={since} merged:<={until}", type:ISSUE, first: $chunk, after: $cursor) {{
+  search(query: "repo:{owner}/{repo} is:pr merged:>={since} merged:<={until}", type:ISSUE, first: $chunk, after: $cursor) {{
     issueCount
     pageInfo {{
       endCursor
@@ -272,8 +272,9 @@ async def get_raw_pull_requests(owner: str, repo: str, token: str, state: str = 
             query = merged_pull_requests_query.format(owner=owner, repo=repo,
                                                       since=since_str, until=until_str)
         else:
+            since_filter = f'updated:>={since_str}' if state == 'closed' else f'created:>={since_str}'
             query = pull_requests_query.format(owner=owner, repo=repo, state=state,
-                                               since=since_str)
+                                               since_filter=since_filter)
 
         while True:
             result = await gh.graphql(query, cursor=cursor, chunk=chunk)
