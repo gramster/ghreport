@@ -1,6 +1,12 @@
 <template>
   <div>
-    <h2>Dashboard</h2>
+    <div class="title-bar">
+      <h2>Dashboard</h2>
+      <div class="date-range">
+        <label>Since: <input type="date" v-model="dateRangeStore.since" /></label>
+        <label>Until: <input type="date" v-model="dateRangeStore.until" /></label>
+      </div>
+    </div>
     <div v-if="loading" class="loading">Loading...</div>
     <template v-else>
       <div v-if="summary" class="grid" style="margin-bottom: 1.5rem;">
@@ -66,7 +72,10 @@
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
 import { useReposStore } from '@/stores/repos'
+import { useDateRangeStore } from '@/stores/dateRange'
 import ChartCard from '@/components/ChartCard.vue'
+
+const dateRangeStore = useDateRangeStore()
 
 interface RepoSummaryItem {
   owner: string; name: string
@@ -128,3 +137,30 @@ async function removeRepo(owner: string, name: string) {
 
 onMounted(load)
 </script>
+
+<style scoped>
+.title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+.title-bar h2 { margin: 0; }
+.date-range {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+.date-range label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+.date-range input {
+  padding: 0.35rem;
+  border: 1px solid #e1e4e8;
+  border-radius: 4px;
+}
+</style>
