@@ -265,11 +265,19 @@ async def get_cached_prs(db: Database, repo_id: int,
 
 
 async def get_cached_team_members(db: Database, repo_id: int) -> set[str]:
+    """Return combined common + repo-specific team members."""
     cursor = await db.db.execute(
         "SELECT login FROM team_members WHERE repo_id = ?", (repo_id,)
     )
     rows = await cursor.fetchall()
-    return {r["login"] for r in rows}
+    members = {r["login"] for r in rows}
+
+    # Merge common members
+    cursor2 = await db.db.execute("SELECT login FROM common_team_members")
+    rows2 = await cursor2.fetchall()
+    members.update(r["login"] for r in rows2)
+
+    return members
 
 
 async def get_sync_status(db: Database, repo_id: int) -> dict | None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -10,6 +10,17 @@ from ...core.analyzer import closed_issues_data, pr_activity_data, revisits_data
 from ..cache import get_cached_issues, get_cached_prs, get_cached_team_members
 
 router = APIRouter(prefix="/api/repos/{owner}/{repo}/reports", tags=["reports"])
+
+
+def _resolve_window(days: int, since: str | None, until: str | None) -> tuple[datetime, int]:
+    """Return (now, effective_days) from days or since/until params."""
+    now = datetime.now(tz=timezone.utc)
+    if since:
+        since_dt = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
+        until_dt = datetime.fromisoformat(until).replace(tzinfo=timezone.utc) if until else now
+        effective_days = max(1, (until_dt - since_dt).days)
+        return until_dt, effective_days
+    return now, days
 
 
 async def _get_repo_id_or_404(request: Request, owner: str, repo: str) -> int:
@@ -48,6 +59,8 @@ async def report_pr_activity(
     owner: str,
     repo: str,
     days: int = Query(1, ge=1),
+    since: str | None = Query(None, description="ISO date override"),
+    until: str | None = Query(None, description="ISO date override"),
     show_all: bool = Query(False),
 ):
     """PR activity report — newly opened, merged, closed PRs."""
@@ -57,10 +70,10 @@ async def report_pr_activity(
     open_prs = await get_cached_prs(db, repo_id, state="open")
     closed_prs = await get_cached_prs(db, repo_id, state="closed")
     merged_prs = await get_cached_prs(db, repo_id, state="merged")
-    now = datetime.now(tz=timezone.utc)
+    now, effective_days = _resolve_window(days, since, until)
 
     return pr_activity_data(now, owner, repo, open_prs,
-                            closed_prs + merged_prs, days=days,
+                            closed_prs + merged_prs, days=effective_days,
                             show_all=show_all)
 
 
@@ -70,12 +83,14 @@ async def report_closed_issues(
     owner: str,
     repo: str,
     days: int = Query(1, ge=1),
+    since: str | None = Query(None, description="ISO date override"),
+    until: str | None = Query(None, description="ISO date override"),
 ):
     """Recently closed issues report."""
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
 
     closed_issues = await get_cached_issues(db, repo_id, state="closed")
-    now = datetime.now(tz=timezone.utc)
+    now, effective_days = _resolve_window(days, since, until)
 
-    return closed_issues_data(now, owner, repo, closed_issues, days=days)
+    return closed_issues_data(now, owner, repo, closed_issues, days=effective_days)

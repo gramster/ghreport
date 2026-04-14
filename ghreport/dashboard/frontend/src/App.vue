@@ -2,6 +2,7 @@
   <div id="app">
     <nav class="navbar">
       <router-link to="/" class="brand">ghreport</router-link>
+      <router-link to="/team" class="nav-link">Team</router-link>
       <RepoSelector />
     </nav>
     <main class="content">
@@ -24,6 +25,8 @@ onMounted(() => reposStore.fetchRepos())
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
 .navbar { display: flex; align-items: center; gap: 1rem; padding: 0.75rem 1.5rem; background: #24292e; color: #fff; }
 .navbar .brand { color: #fff; text-decoration: none; font-size: 1.25rem; font-weight: 600; }
+.nav-link { color: #ffffffcc; text-decoration: none; font-size: 0.9rem; }
+.nav-link:hover { color: #fff; }
 .content { max-width: 1200px; margin: 1.5rem auto; padding: 0 1rem; }
 a { color: #0366d6; }
 table { width: 100%; border-collapse: collapse; margin: 1rem 0; }

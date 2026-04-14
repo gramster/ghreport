@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import Settings, load_settings
 from .db import Database
 from .scheduler import SyncScheduler
-from .routes import repos, issues, prs, reports, charts, aggregate, sync
+from .routes import repos, issues, prs, reports, charts, aggregate, sync, team, members
 
 
 @asynccontextmanager
@@ -58,6 +58,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.include_router(charts.router)
     app.include_router(aggregate.router)
     app.include_router(sync.router)
+    app.include_router(team.router)
+    app.include_router(members.router)
 
     # Mount Vue frontend static files (if built)
     frontend_dist = Path(__file__).parent / "frontend" / "dist"

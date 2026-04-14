@@ -8,10 +8,12 @@
       <router-link :to="{ name: 'closed-issues', params: { owner, repo } }">Closed Issues</router-link>
     </div>
 
-    <div style="margin-bottom: 1rem;">
+    <div class="filters" style="margin-bottom: 1rem;">
       <label>Window (days):
         <input v-model.number="days" type="number" min="1" style="width: 60px; margin-left: 0.25rem;" />
       </label>
+      <label>Since: <input type="date" v-model="since" /></label>
+      <label>Until: <input type="date" v-model="until" /></label>
     </div>
 
     <div v-if="loading" class="loading">Loading...</div>
@@ -51,13 +53,18 @@ const props = defineProps<{ owner: string; repo: string }>()
 const data = ref<ClosedIssuesData | null>(null)
 const loading = ref(true)
 const days = ref(7)
+const since = ref('')
+const until = ref('')
 
 async function load() {
   loading.value = true
   try {
+    const params: Record<string, string | number> = { days: days.value }
+    if (since.value) params.since = since.value
+    if (until.value) params.until = until.value
     const { data: d } = await axios.get(
       `/api/repos/${props.owner}/${props.repo}/reports/closed-issues`,
-      { params: { days: days.value } },
+      { params },
     )
     data.value = d
   } finally {
@@ -67,5 +74,24 @@ async function load() {
 
 onMounted(load)
 watch(() => [props.owner, props.repo], load)
-watch(days, load)
+watch([days, since, until], load)
 </script>
+
+<style scoped>
+.filters {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.filters label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.filters input {
+  padding: 0.35rem;
+  border: 1px solid #e1e4e8;
+  border-radius: 4px;
+}
+</style>

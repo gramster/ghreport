@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS team_members (
     UNIQUE(repo_id, login)
 );
 
+CREATE TABLE IF NOT EXISTS common_team_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    login TEXT NOT NULL UNIQUE
+);
+
 CREATE TABLE IF NOT EXISTS sync_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     repo_id INTEGER NOT NULL REFERENCES repos(id),
