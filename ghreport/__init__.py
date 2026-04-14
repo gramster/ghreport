@@ -93,6 +93,27 @@ def training(repo, token, out, verbose, team, bug, feat, info):
     get_training_data(owner, repo_name, token, out, verbose=verbose, extra_members=team, exclude_labels=[bug, feat, info])
 
 
+@cli.command()
+@click.option('-p', '--port', default=8000, type=int, help='Port to listen on.')
+@click.option('-H', '--host', default='0.0.0.0', type=str, help='Host to bind to.')
+@click.option('-c', '--config', type=click.Path(exists=True), default=None,
+              help='Path to TOML config file.')
+def dashboard(port, host, config):
+    """Launch the interactive web dashboard."""
+    try:
+        import uvicorn
+        from .dashboard.app import create_app
+    except ImportError:
+        click.echo("Dashboard dependencies not installed. Install with:")
+        click.echo("  pip install ghreport[dashboard]")
+        raise SystemExit(1)
+
+    app = create_app(config)
+    app.state.settings.port = port
+    app.state.settings.host = host
+    uvicorn.run(app, host=host, port=port)
+
+
 def main():
     cli()
 

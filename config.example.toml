@@ -1,0 +1,27 @@
+# ghreport Dashboard Configuration
+# Copy to config.toml and edit as needed.
+
+# GitHub token (can also be set via GH_TOKEN or GHREPORT_GITHUB_TOKEN env vars)
+# github_token = "ghp_..."
+
+# Path to SQLite database file
+db_path = "data/ghreport.db"
+
+# How often to sync data from GitHub (minutes)
+sync_interval_minutes = 60
+
+# Timezone for date/time display
+timezone = "America/Los_Angeles"
+
+# Server settings
+host = "0.0.0.0"
+port = 8000
+
+# Repository configurations
+[[repos]]
+owner = "microsoft"
+name = "debugpy"
+bug_label = "bug"
+stale_days = 30
+# team = "+extra_member1,extra_member2"  # Optional: + prefix adds to auto-detected team
+# pr_repo = "debugpy"                     # Optional: if PR repo differs from issue repo

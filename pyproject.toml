@@ -26,11 +26,21 @@ classifiers = ["Intended Audience :: Developers",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
+[project.optional-dependencies]
+dashboard = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "aiosqlite>=0.20",
+    "apscheduler>=3.10,<4",
+    "pydantic-settings>=2.2",
+]
+
 [project.urls]
 Source = "https://github.com/gramster/ghreport"
 
 [project.scripts]
 ghreport = "ghreport:main"
+ghreport-dashboard = "ghreport.dashboard.app:main"
 
 [tool.pytest.ini_options]
 minversion = "6.0"

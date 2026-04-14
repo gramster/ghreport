@@ -1,0 +1,38 @@
+import { createRouter, createWebHistory } from 'vue-router'
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    {
+      path: '/',
+      name: 'home',
+      component: () => import('@/views/DashboardHome.vue'),
+    },
+    {
+      path: '/repo/:owner/:repo',
+      name: 'repo-detail',
+      component: () => import('@/views/RepoDetail.vue'),
+      props: true,
+    },
+    {
+      path: '/repo/:owner/:repo/revisits',
+      name: 'issue-revisits',
+      component: () => import('@/views/IssueRevisits.vue'),
+      props: true,
+    },
+    {
+      path: '/repo/:owner/:repo/pr-activity',
+      name: 'pr-activity',
+      component: () => import('@/views/PrActivity.vue'),
+      props: true,
+    },
+    {
+      path: '/repo/:owner/:repo/closed',
+      name: 'closed-issues',
+      component: () => import('@/views/ClosedIssues.vue'),
+      props: true,
+    },
+  ],
+})
+
+export default router

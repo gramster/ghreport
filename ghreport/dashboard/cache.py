@@ -1,0 +1,281 @@
+"""Cache layer: sync GitHub data into SQLite and retrieve as core models."""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta
+
+from ..core.fetcher import get_raw_issues, get_raw_pull_requests
+from ..core.models import Event, Issue, PullRequest
+from ..core.parser import parse_raw_issue, parse_raw_pull_request, utc_to_local, format_date
+from ..core.teams import get_members
+from .db import Database
+
+
+def _dt_str(dt: datetime | None) -> str | None:
+    return dt.isoformat() if dt else None
+
+
+def _parse_dt(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    return datetime.fromisoformat(s)
+
+
+async def sync_repo(db: Database, owner: str, repo: str, token: str,
+                    team: str | None = None, force: bool = False) -> dict:
+    """Fetch data from GitHub and upsert into SQLite.
+
+    Returns a summary dict with counts.
+    """
+    repo_id = await db.ensure_repo(owner, repo)
+
+    # Log sync start
+    now_str = datetime.utcnow().isoformat()
+    cursor = await db.db.execute(
+        "INSERT INTO sync_log (repo_id, started_at, status) VALUES (?, ?, 'running')",
+        (repo_id, now_str),
+    )
+    sync_id = cursor.lastrowid
+    await db.db.commit()
+
+    # Determine since date for incremental sync
+    since = None
+    if not force:
+        row = await (await db.db.execute(
+            "SELECT last_synced_at FROM repos WHERE id = ?", (repo_id,)
+        )).fetchone()
+        if row and row[0]:
+            since = datetime.fromisoformat(row[0]) - timedelta(days=1)
+
+    # Fetch team members
+    members = get_members(owner, repo, token)
+    if team:
+        if team.startswith('+'):
+            members.update(team[1:].split(','))
+        else:
+            members = set(team.split(','))
+
+    # Store team members
+    await db.db.execute("DELETE FROM team_members WHERE repo_id = ?", (repo_id,))
+    for login in members:
+        await db.db.execute(
+            "INSERT OR IGNORE INTO team_members (repo_id, login) VALUES (?, ?)",
+            (repo_id, login),
+        )
+
+    # Fetch and store issues (open always re-fetched, closed incremental)
+    issues_count = 0
+    for state in ('open', 'closed'):
+        s = since if state == 'closed' else None
+        raw_issues = await get_raw_issues(owner, repo, token, state=state, since=s)
+        for raw in raw_issues:
+            parsed = parse_raw_issue(raw, members)
+            if not parsed:
+                continue
+            issues_count += 1
+            await _upsert_issue(db, repo_id, parsed, raw, state)
+
+    # Fetch and store PRs
+    prs_count = 0
+    for state in ('open', 'closed', 'merged'):
+        s = since if state != 'open' else None
+        raw_prs = await get_raw_pull_requests(owner, repo, token, state=state, since=s)
+        for raw in raw_prs:
+            parsed = parse_raw_pull_request(raw)
+            if not parsed:
+                continue
+            prs_count += 1
+            pr_state = 'merged' if parsed.merged_at else ('closed' if parsed.closed_at else 'open')
+            await _upsert_pr(db, repo_id, parsed, raw, pr_state)
+
+    # Update sync status
+    completed_str = datetime.utcnow().isoformat()
+    await db.db.execute(
+        "UPDATE sync_log SET completed_at = ?, status = 'completed', "
+        "issues_fetched = ?, prs_fetched = ? WHERE id = ?",
+        (completed_str, issues_count, prs_count, sync_id),
+    )
+    await db.update_last_synced(repo_id, completed_str)
+    await db.db.commit()
+
+    return {"issues_fetched": issues_count, "prs_fetched": prs_count}
+
+
+async def _upsert_issue(db: Database, repo_id: int, issue: Issue, raw: dict, state: str):
+    """Insert or update an issue and its events."""
+    # Check if exists
+    cursor = await db.db.execute(
+        "SELECT id FROM issues WHERE repo_id = ? AND number = ?", (repo_id, issue.number)
+    )
+    existing = await cursor.fetchone()
+
+    if existing:
+        issue_db_id = existing[0]
+        await db.db.execute("""
+            UPDATE issues SET title=?, created_by=?, closed_by=?, created_at=?, closed_at=?,
+            first_team_response_at=?, last_team_response_at=?, last_op_response_at=?,
+            last_response_at=?, state=?, raw_json=? WHERE id=?
+        """, (issue.title, issue.created_by, issue.closed_by,
+              _dt_str(issue.created_at), _dt_str(issue.closed_at),
+              _dt_str(issue.first_team_response_at), _dt_str(issue.last_team_response_at),
+              _dt_str(issue.last_op_response_at), _dt_str(issue.last_response_at),
+              state, json.dumps(raw), issue_db_id))
+        # Replace events
+        await db.db.execute("DELETE FROM events WHERE issue_id = ?", (issue_db_id,))
+    else:
+        cursor = await db.db.execute("""
+            INSERT INTO issues (repo_id, number, title, created_by, closed_by, created_at,
+            closed_at, first_team_response_at, last_team_response_at, last_op_response_at,
+            last_response_at, state, raw_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (repo_id, issue.number, issue.title, issue.created_by, issue.closed_by,
+              _dt_str(issue.created_at), _dt_str(issue.closed_at),
+              _dt_str(issue.first_team_response_at), _dt_str(issue.last_team_response_at),
+              _dt_str(issue.last_op_response_at), _dt_str(issue.last_response_at),
+              state, json.dumps(raw)))
+        issue_db_id = cursor.lastrowid
+
+    # Insert events
+    for evt in issue.events:
+        await db.db.execute(
+            "INSERT INTO events (issue_id, when_at, actor, event, arg) VALUES (?, ?, ?, ?, ?)",
+            (issue_db_id, _dt_str(evt.when), evt.actor, evt.event, evt.arg),
+        )
+
+
+async def _upsert_pr(db: Database, repo_id: int, pr: PullRequest, raw: dict, state: str):
+    """Insert or update a pull request and its files."""
+    cursor = await db.db.execute(
+        "SELECT id FROM pull_requests WHERE repo_id = ? AND number = ?", (repo_id, pr.number)
+    )
+    existing = await cursor.fetchone()
+
+    if existing:
+        pr_db_id = existing[0]
+        await db.db.execute("""
+            UPDATE pull_requests SET title=?, created_by=?, closed_by=?, created_at=?,
+            merged_at=?, closed_at=?, lines_changed=?, files_changed=?, state=?, raw_json=?
+            WHERE id=?
+        """, (pr.title, pr.created_by, pr.closed_by,
+              _dt_str(pr.created_at), _dt_str(pr.merged_at), _dt_str(pr.closed_at),
+              pr.lines_changed, pr.files_changed, state, json.dumps(raw), pr_db_id))
+        await db.db.execute("DELETE FROM pr_files WHERE pr_id = ?", (pr_db_id,))
+    else:
+        cursor = await db.db.execute("""
+            INSERT INTO pull_requests (repo_id, number, title, created_by, closed_by,
+            created_at, merged_at, closed_at, lines_changed, files_changed, state, raw_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (repo_id, pr.number, pr.title, pr.created_by, pr.closed_by,
+              _dt_str(pr.created_at), _dt_str(pr.merged_at), _dt_str(pr.closed_at),
+              pr.lines_changed, pr.files_changed, state, json.dumps(raw)))
+        pr_db_id = cursor.lastrowid
+
+    for path in pr.files:
+        await db.db.execute(
+            "INSERT INTO pr_files (pr_id, path) VALUES (?, ?)", (pr_db_id, path)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Cache read functions — convert SQLite rows to core models
+# ---------------------------------------------------------------------------
+
+async def get_cached_issues(db: Database, repo_id: int,
+                            state: str | None = None) -> list[Issue]:
+    """Load issues from cache as core Issue models."""
+    if state:
+        cursor = await db.db.execute(
+            "SELECT * FROM issues WHERE repo_id = ? AND state = ?", (repo_id, state)
+        )
+    else:
+        cursor = await db.db.execute(
+            "SELECT * FROM issues WHERE repo_id = ?", (repo_id,)
+        )
+    rows = await cursor.fetchall()
+
+    issues = []
+    for row in rows:
+        row_dict = dict(row)
+        # Load events
+        evt_cursor = await db.db.execute(
+            "SELECT when_at, actor, event, arg FROM events WHERE issue_id = ? ORDER BY when_at",
+            (row_dict["id"],)
+        )
+        evt_rows = await evt_cursor.fetchall()
+        events = [Event(
+            when=_parse_dt(e["when_at"]),  # type: ignore
+            actor=e["actor"] or "",
+            event=e["event"] or "",
+            arg=e["arg"] or "",
+        ) for e in evt_rows]
+
+        issues.append(Issue(
+            number=row_dict["number"],
+            title=row_dict["title"],
+            created_by=row_dict["created_by"] or "",
+            closed_by=row_dict["closed_by"],
+            created_at=_parse_dt(row_dict["created_at"]),  # type: ignore
+            closed_at=_parse_dt(row_dict["closed_at"]),
+            first_team_response_at=_parse_dt(row_dict["first_team_response_at"]),
+            last_team_response_at=_parse_dt(row_dict["last_team_response_at"]),
+            last_op_response_at=_parse_dt(row_dict["last_op_response_at"]),
+            last_response_at=_parse_dt(row_dict["last_response_at"]),
+            events=events,
+        ))
+    return issues
+
+
+async def get_cached_prs(db: Database, repo_id: int,
+                         state: str | None = None) -> list[PullRequest]:
+    """Load pull requests from cache as core PullRequest models."""
+    if state:
+        cursor = await db.db.execute(
+            "SELECT * FROM pull_requests WHERE repo_id = ? AND state = ?", (repo_id, state)
+        )
+    else:
+        cursor = await db.db.execute(
+            "SELECT * FROM pull_requests WHERE repo_id = ?", (repo_id,)
+        )
+    rows = await cursor.fetchall()
+
+    prs = []
+    for row in rows:
+        row_dict = dict(row)
+        # Load files
+        file_cursor = await db.db.execute(
+            "SELECT path FROM pr_files WHERE pr_id = ?", (row_dict["id"],)
+        )
+        file_rows = await file_cursor.fetchall()
+        files = [f["path"] for f in file_rows]
+
+        prs.append(PullRequest(
+            number=row_dict["number"],
+            title=row_dict["title"],
+            created_at=_parse_dt(row_dict["created_at"]),  # type: ignore
+            created_by=row_dict["created_by"] or "",
+            merged_at=_parse_dt(row_dict["merged_at"]),
+            closed_at=_parse_dt(row_dict["closed_at"]),
+            closed_by=row_dict["closed_by"],
+            lines_changed=row_dict["lines_changed"] or 0,
+            files_changed=row_dict["files_changed"] or 0,
+            files=files,
+        ))
+    return prs
+
+
+async def get_cached_team_members(db: Database, repo_id: int) -> set[str]:
+    cursor = await db.db.execute(
+        "SELECT login FROM team_members WHERE repo_id = ?", (repo_id,)
+    )
+    rows = await cursor.fetchall()
+    return {r["login"] for r in rows}
+
+
+async def get_sync_status(db: Database, repo_id: int) -> dict | None:
+    cursor = await db.db.execute(
+        "SELECT * FROM sync_log WHERE repo_id = ? ORDER BY started_at DESC LIMIT 1",
+        (repo_id,)
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
