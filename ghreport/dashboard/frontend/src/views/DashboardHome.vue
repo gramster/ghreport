@@ -51,9 +51,9 @@
         <h3 style="margin-top: 1.5rem;">Aggregate Charts</h3>
         <div class="grid">
           <ChartCard title="Open Issues" :aggregate="true" chart-type="open-issues" />
-          <ChartCard title="Time to Merge" :aggregate="true" chart-type="time-to-merge" />
-          <ChartCard title="Time to Close" :aggregate="true" chart-type="time-to-close" />
-          <ChartCard title="Time to Response" :aggregate="true" chart-type="time-to-response" />
+          <ChartCard title="Time to Merge (days)" :aggregate="true" chart-type="time-to-merge" />
+          <ChartCard title="Time to Close (days)" :aggregate="true" chart-type="time-to-close" />
+          <ChartCard title="Time to Response (days)" :aggregate="true" chart-type="time-to-response" />
           <ChartCard title="Label Frequency" :aggregate="true" chart-type="label-frequency" />
           <ChartCard title="Top Terms" :aggregate="true" chart-type="top-terms" />
         </div>

@@ -43,7 +43,10 @@ const options = {
   plugins: { legend: { display: false } },
   scales: {
     x: { ticks: { maxTicksLimit: 12 } },
-    y: { beginAtZero: true },
+    y: {
+      beginAtZero: true,
+      title: { display: true, text: 'Days' },
+    },
   },
 }
 </script>

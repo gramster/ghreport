@@ -1,6 +1,14 @@
 <template>
   <div>
-    <h2>{{ owner }}/{{ repo }}</h2>
+    <div class="title-bar">
+      <h2>{{ owner }}/{{ repo }}</h2>
+      <div class="title-actions">
+        <span v-if="repoInfo?.last_synced_at" class="sync-time">{{ new Date(repoInfo.last_synced_at).toLocaleString() }}</span>
+        <button class="primary" @click="triggerSync" :disabled="syncing">
+          {{ syncing ? 'Syncing...' : 'Sync Now' }}
+        </button>
+      </div>
+    </div>
     <div class="tabs">
       <router-link :to="{ name: 'repo-detail', params: { owner, repo } }">Overview</router-link>
       <router-link :to="{ name: 'issue-revisits', params: { owner, repo } }">Revisits</router-link>
@@ -33,22 +41,12 @@
         </div>
       </div>
 
-      <div class="card">
-        <h3>Actions</h3>
-        <button class="primary" @click="triggerSync" :disabled="syncing">
-          {{ syncing ? 'Syncing...' : 'Sync Now' }}
-        </button>
-        <span v-if="repoInfo.last_synced_at" style="margin-left: 1rem; color: #586069;">
-          Last synced: {{ new Date(repoInfo.last_synced_at).toLocaleString() }}
-        </span>
-      </div>
-
       <h3 style="margin-top: 1rem;">Charts</h3>
       <div class="grid">
         <ChartCard :key="'open-issues-'+syncVersion" title="Open Issues" :owner="owner" :repo="repo" chart-type="open-issues" />
-        <ChartCard :key="'time-to-merge-'+syncVersion" title="Time to Merge" :owner="owner" :repo="repo" chart-type="time-to-merge" />
-        <ChartCard :key="'time-to-close-'+syncVersion" title="Time to Close" :owner="owner" :repo="repo" chart-type="time-to-close" />
-        <ChartCard :key="'time-to-response-'+syncVersion" title="Time to Response" :owner="owner" :repo="repo" chart-type="time-to-response" />
+        <ChartCard :key="'time-to-merge-'+syncVersion" title="Time to Merge (days)" :owner="owner" :repo="repo" chart-type="time-to-merge" />
+        <ChartCard :key="'time-to-close-'+syncVersion" title="Time to Close (days)" :owner="owner" :repo="repo" chart-type="time-to-close" />
+        <ChartCard :key="'time-to-response-'+syncVersion" title="Time to Response (days)" :owner="owner" :repo="repo" chart-type="time-to-response" />
         <ChartCard :key="'label-frequency-'+syncVersion" title="Label Frequency" :owner="owner" :repo="repo" chart-type="label-frequency" />
         <ChartCard :key="'files-changed-'+syncVersion" title="Files Changed/PR" :owner="owner" :repo="repo" chart-type="files-changed" />
         <ChartCard :key="'lines-changed-'+syncVersion" title="Lines Changed/PR" :owner="owner" :repo="repo" chart-type="lines-changed" />
@@ -116,5 +114,23 @@ watch(() => [props.owner, props.repo], load)
   font-size: 0.75rem;
   color: #586069;
   margin-top: 0.25rem;
+}
+.title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.title-bar h2 {
+  margin: 0;
+}
+.title-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.sync-time {
+  font-size: 0.8rem;
+  color: #586069;
 }
 </style>
