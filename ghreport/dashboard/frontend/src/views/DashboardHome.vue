@@ -34,6 +34,16 @@
             <span class="badge open">{{ r.open_issues }} open issues</span>
             <span class="badge merged" style="margin-left: 0.5rem;">{{ r.merged_prs }} merged PRs</span>
           </p>
+          <button class="danger" style="margin-top: 0.5rem;" @click="removeRepo(r.owner, r.name)">Remove</button>
+        </div>
+
+        <div class="card add-repo-card">
+          <h3>Add Repository</h3>
+          <form @submit.prevent="addRepo" style="display: flex; flex-direction: column; gap: 0.5rem;">
+            <input v-model="newRepo" placeholder="owner/repo" style="padding: 0.4rem; border: 1px solid #e1e4e8; border-radius: 4px;" />
+            <button class="primary" type="submit" :disabled="!newRepo.includes('/')">Add</button>
+            <p v-if="addError" style="color: #cb2431; font-size: 0.85rem;">{{ addError }}</p>
+          </form>
         </div>
       </div>
     </template>
@@ -43,6 +53,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
+import { useReposStore } from '@/stores/repos'
 
 interface RepoSummaryItem {
   owner: string; name: string
@@ -56,15 +67,51 @@ interface AggSummary {
   repos: RepoSummaryItem[]
 }
 
+const reposStore = useReposStore()
 const summary = ref<AggSummary | null>(null)
 const loading = ref(true)
+const newRepo = ref('')
+const addError = ref<string | null>(null)
 
-onMounted(async () => {
+async function load() {
+  loading.value = true
   try {
     const { data } = await axios.get<AggSummary>('/api/aggregate/summary')
     summary.value = data
   } finally {
     loading.value = false
   }
-})
+}
+
+async function addRepo() {
+  addError.value = null
+  const parts = newRepo.value.trim().split('/')
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    addError.value = 'Enter as owner/repo'
+    return
+  }
+  try {
+    await reposStore.addRepo(parts[0], parts[1])
+    newRepo.value = ''
+    await load()
+  } catch (e: unknown) {
+    if (axios.isAxiosError(e) && e.response?.status === 409) {
+      addError.value = 'Repository already added'
+    } else {
+      addError.value = 'Failed to add repository'
+    }
+  }
+}
+
+async function removeRepo(owner: string, name: string) {
+  if (!confirm(`Remove ${owner}/${name} and all its cached data?`)) return
+  try {
+    await reposStore.removeRepo(owner, name)
+    await load()
+  } catch {
+    alert('Failed to remove repository')
+  }
+}
+
+onMounted(load)
 </script>

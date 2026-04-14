@@ -41,6 +41,8 @@ button { padding: 0.4rem 0.8rem; border: 1px solid #e1e4e8; border-radius: 4px; 
 button:hover { background: #f3f4f6; }
 button.primary { background: #2ea44f; color: #fff; border-color: #2ea44f; }
 button.primary:hover { background: #2c974b; }
+button.danger { background: #cb2431; color: #fff; border-color: #cb2431; font-size: 0.8rem; }
+button.danger:hover { background: #a3202a; }
 .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 10px; font-size: 0.75rem; font-weight: 600; }
 .badge.open { background: #2ea44f; color: #fff; }
 .badge.closed { background: #6f42c1; color: #fff; }

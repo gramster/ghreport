@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/repos", tags=["repos"])
+
+
+class AddRepoRequest(BaseModel):
+    owner: str
+    repo: str
 
 
 @router.get("")
@@ -68,3 +74,25 @@ async def get_repo(request: Request, owner: str, repo: str):
         "issues": issue_counts,
         "pull_requests": pr_counts,
     }
+
+
+@router.post("")
+async def add_repo(request: Request, body: AddRepoRequest):
+    """Add a new repository to track."""
+    db = request.app.state.db
+    existing = await db.get_repo_id(body.owner, body.repo)
+    if existing:
+        raise HTTPException(409, f"Repository {body.owner}/{body.repo} already exists")
+    repo_id = await db.ensure_repo(body.owner, body.repo)
+    return {"owner": body.owner, "name": body.repo, "id": repo_id}
+
+
+@router.delete("/{owner}/{repo}")
+async def remove_repo(request: Request, owner: str, repo: str):
+    """Remove a repository and all its cached data."""
+    db = request.app.state.db
+    repo_id = await db.get_repo_id(owner, repo)
+    if not repo_id:
+        raise HTTPException(404, f"Repository {owner}/{repo} not found")
+    await db.remove_repo(repo_id)
+    return {"status": "deleted", "owner": owner, "name": repo}

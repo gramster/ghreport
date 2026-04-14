@@ -150,6 +150,25 @@ class Database:
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
 
+    async def remove_repo(self, repo_id: int):
+        """Delete a repo and all its associated data."""
+        await self.db.execute("DELETE FROM sync_log WHERE repo_id = ?", (repo_id,))
+        await self.db.execute("DELETE FROM team_members WHERE repo_id = ?", (repo_id,))
+        # Delete events for this repo's issues
+        await self.db.execute(
+            "DELETE FROM events WHERE issue_id IN (SELECT id FROM issues WHERE repo_id = ?)",
+            (repo_id,),
+        )
+        await self.db.execute("DELETE FROM issues WHERE repo_id = ?", (repo_id,))
+        # Delete pr_files for this repo's PRs
+        await self.db.execute(
+            "DELETE FROM pr_files WHERE pr_id IN (SELECT id FROM pull_requests WHERE repo_id = ?)",
+            (repo_id,),
+        )
+        await self.db.execute("DELETE FROM pull_requests WHERE repo_id = ?", (repo_id,))
+        await self.db.execute("DELETE FROM repos WHERE id = ?", (repo_id,))
+        await self.db.commit()
+
     async def update_last_synced(self, repo_id: int, when: str):
         await self.db.execute(
             "UPDATE repos SET last_synced_at = ? WHERE id = ?", (when, repo_id)

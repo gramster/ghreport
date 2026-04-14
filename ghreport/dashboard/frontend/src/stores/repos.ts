@@ -24,5 +24,13 @@ export const useReposStore = defineStore('repos', {
         this.loading = false
       }
     },
+    async addRepo(owner: string, name: string) {
+      await axios.post('/api/repos', { owner, repo: name })
+      await this.fetchRepos()
+    },
+    async removeRepo(owner: string, name: string) {
+      await axios.delete(`/api/repos/${owner}/${name}`)
+      await this.fetchRepos()
+    },
   },
 })
