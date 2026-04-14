@@ -42,13 +42,23 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
 
+interface PrItem {
+  number: number; title: string; created_by: string; created_at: string
+  days_open: number; lines_changed: number
+}
+
+interface PrActivityData {
+  newly_opened: PrItem[]; newly_merged: PrItem[]
+  newly_closed: PrItem[]; stale_open: PrItem[]
+}
+
 const props = defineProps<{ owner: string; repo: string }>()
-const data = ref<Record<string, unknown[]> | null>(null)
+const data = ref<PrActivityData | null>(null)
 const loading = ref(true)
 const days = ref(7)
 
-const sections = computed(() => {
-  if (!data.value) return {}
+const sections = computed<Record<string, PrItem[]>>(() => {
+  if (!data.value) return {} as Record<string, PrItem[]>
   return {
     'Newly Opened': data.value.newly_opened || [],
     'Newly Merged': data.value.newly_merged || [],

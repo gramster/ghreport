@@ -39,8 +39,17 @@
 import { ref, onMounted, watch } from 'vue'
 import axios from 'axios'
 
+interface ClosedIssue {
+  number: number; title: string; created_by: string
+  closed_at: string | null; closed_by: string | null; days_open: number
+}
+
+interface ClosedIssuesData {
+  issues: ClosedIssue[]
+}
+
 const props = defineProps<{ owner: string; repo: string }>()
-const data = ref<Record<string, unknown> | null>(null)
+const data = ref<ClosedIssuesData | null>(null)
 const loading = ref(true)
 const days = ref(7)
 

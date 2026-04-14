@@ -24,7 +24,8 @@ const props = defineProps<{
   chartType: string
 }>()
 
-const chartData = ref<unknown>(null)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const chartData = ref<any>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
 

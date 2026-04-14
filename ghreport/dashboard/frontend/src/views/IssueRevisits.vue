@@ -37,8 +37,17 @@
 import { ref, onMounted, watch } from 'vue'
 import axios from 'axios'
 
+interface RevisitIssue {
+  number: number; title: string; created_by: string; created_at: string; star: boolean
+  days_op?: number; days_team?: number; days_third_party?: number
+}
+
+interface RevisitsData {
+  sections: Record<string, Record<string, RevisitIssue[]>>
+}
+
 const props = defineProps<{ owner: string; repo: string }>()
-const data = ref<Record<string, unknown> | null>(null)
+const data = ref<RevisitsData | null>(null)
 const loading = ref(true)
 
 function formatCat(key: string): string {

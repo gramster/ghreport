@@ -59,8 +59,14 @@ import { ref, onMounted, watch } from 'vue'
 import axios from 'axios'
 import ChartCard from '@/components/ChartCard.vue'
 
+interface RepoInfo {
+  issues: Record<string, number>
+  pull_requests: Record<string, number>
+  last_synced_at: string | null
+}
+
 const props = defineProps<{ owner: string; repo: string }>()
-const repoInfo = ref<Record<string, unknown> | null>(null)
+const repoInfo = ref<RepoInfo | null>(null)
 const loading = ref(true)
 const syncing = ref(false)
 
