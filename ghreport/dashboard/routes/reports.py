@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -35,7 +35,7 @@ async def report_revisits(
 
     issues = await get_cached_issues(db, repo_id, state="open")
     members = await get_cached_team_members(db, repo_id)
-    now = datetime.now()
+    now = datetime.now(tz=timezone.utc)
 
     return revisits_data(now, owner, repo, issues, members,
                          bug_label=bug_label, days=days, stale=stale,
@@ -57,7 +57,7 @@ async def report_pr_activity(
     open_prs = await get_cached_prs(db, repo_id, state="open")
     closed_prs = await get_cached_prs(db, repo_id, state="closed")
     merged_prs = await get_cached_prs(db, repo_id, state="merged")
-    now = datetime.now()
+    now = datetime.now(tz=timezone.utc)
 
     return pr_activity_data(now, owner, repo, open_prs,
                             closed_prs + merged_prs, days=days,
@@ -76,6 +76,6 @@ async def report_closed_issues(
     repo_id = await _get_repo_id_or_404(request, owner, repo)
 
     closed_issues = await get_cached_issues(db, repo_id, state="closed")
-    now = datetime.now()
+    now = datetime.now(tz=timezone.utc)
 
     return closed_issues_data(now, owner, repo, closed_issues, days=days)

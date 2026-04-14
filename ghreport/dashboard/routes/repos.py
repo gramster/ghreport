@@ -7,6 +7,30 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/repos", tags=["repos"])
 
+_DATE_RANGE_THRESHOLD = 1000
+
+
+async def _get_date_ranges(db, repo_id: int, issue_counts: dict, pr_counts: dict) -> dict:
+    """Return min/max created_at for categories at or near the GitHub search cap."""
+    ranges = {}
+    for state, cnt in issue_counts.items():
+        if cnt >= _DATE_RANGE_THRESHOLD:
+            row = await (await db.db.execute(
+                "SELECT MIN(created_at) as earliest, MAX(created_at) as latest "
+                "FROM issues WHERE repo_id = ? AND state = ?", (repo_id, state)
+            )).fetchone()
+            if row:
+                ranges[f"issues_{state}"] = {"earliest": row["earliest"], "latest": row["latest"]}
+    for state, cnt in pr_counts.items():
+        if cnt >= _DATE_RANGE_THRESHOLD:
+            row = await (await db.db.execute(
+                "SELECT MIN(created_at) as earliest, MAX(created_at) as latest "
+                "FROM pull_requests WHERE repo_id = ? AND state = ?", (repo_id, state)
+            )).fetchone()
+            if row:
+                ranges[f"prs_{state}"] = {"earliest": row["earliest"], "latest": row["latest"]}
+    return ranges
+
 
 class AddRepoRequest(BaseModel):
     owner: str
@@ -33,12 +57,16 @@ async def list_repos(request: Request):
         )
         pr_counts = {row["state"]: row["cnt"] for row in await pc.fetchall()}
 
+        # Add date ranges when counts are high (GitHub search caps at 1000)
+        date_ranges = await _get_date_ranges(db, r["id"], issue_counts, pr_counts)
+
         results.append({
             "owner": r["owner"],
             "name": r["name"],
             "last_synced_at": r["last_synced_at"],
             "issues": issue_counts,
             "pull_requests": pr_counts,
+            "date_ranges": date_ranges,
         })
     return results
 
@@ -67,12 +95,15 @@ async def get_repo(request: Request, owner: str, repo: str):
         "SELECT * FROM repos WHERE id = ?", (repo_id,)
     )).fetchone()
 
+    date_ranges = await _get_date_ranges(db, repo_id, issue_counts, pr_counts)
+
     return {
         "owner": owner,
         "name": repo,
         "last_synced_at": repo_row["last_synced_at"] if repo_row else None,
         "issues": issue_counts,
         "pull_requests": pr_counts,
+        "date_ranges": date_ranges,
     }
 
 

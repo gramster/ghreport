@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Query, Request
 
@@ -100,7 +100,7 @@ async def aggregate_chart(
     """Cross-repo chart data (merged from all repos)."""
     if chart_type == "open-issues":
         issues = await _collect_all_issues(request)
-        end = datetime.now()
+        end = datetime.now(tz=timezone.utc)
         start = end - timedelta(days=months * 30)
         return open_issue_counts_data(start, end, issues, bug_labels=["bug"])
     elif chart_type == "time-to-merge":
@@ -112,7 +112,7 @@ async def aggregate_chart(
     elif chart_type == "time-to-response":
         open_issues = await _collect_all_issues(request, state="open")
         closed_issues = await _collect_all_issues(request, state="closed")
-        since = datetime.now() - timedelta(days=months * 30)
+        since = datetime.now(tz=timezone.utc) - timedelta(days=months * 30)
         return time_to_first_response_data(open_issues, closed_issues, since=since)
     elif chart_type == "label-frequency":
         issues = await _collect_all_issues(request, state="open")
@@ -146,7 +146,7 @@ async def aggregate_report(
     """Cross-repo report data."""
     db = request.app.state.db
     repos = await db.get_all_repos()
-    now = datetime.now()
+    now = datetime.now(tz=timezone.utc)
 
     if report_type == "revisits":
         results = []

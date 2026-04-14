@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -42,7 +42,7 @@ async def chart_open_issues(
     repo_id = await _get_repo_id_or_404(request, owner, repo)
 
     issues = await get_cached_issues(db, repo_id)
-    end = datetime.now()
+    end = datetime.now(tz=timezone.utc)
     start = end - timedelta(days=months * 30)
 
     return open_issue_counts_data(start, end, issues, bug_labels=["bug"],
@@ -90,7 +90,7 @@ async def chart_time_to_response(
 
     open_issues = await get_cached_issues(db, repo_id, state="open")
     closed_issues = await get_cached_issues(db, repo_id, state="closed")
-    since = datetime.now() - timedelta(days=months * 30)
+    since = datetime.now(tz=timezone.utc) - timedelta(days=months * 30)
 
     return time_to_first_response_data(open_issues, closed_issues, since=since)
 

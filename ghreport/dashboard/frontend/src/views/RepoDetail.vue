@@ -14,18 +14,22 @@
         <div class="card">
           <div class="stat">{{ repoInfo.issues?.open || 0 }}</div>
           <div class="stat-label">Open Issues</div>
+          <div v-if="repoInfo.date_ranges?.issues_open" class="stat-range">{{ formatRange(repoInfo.date_ranges.issues_open) }}</div>
         </div>
         <div class="card">
           <div class="stat">{{ repoInfo.issues?.closed || 0 }}</div>
           <div class="stat-label">Closed Issues</div>
+          <div v-if="repoInfo.date_ranges?.issues_closed" class="stat-range">{{ formatRange(repoInfo.date_ranges.issues_closed) }}</div>
         </div>
         <div class="card">
           <div class="stat">{{ repoInfo.pull_requests?.open || 0 }}</div>
           <div class="stat-label">Open PRs</div>
+          <div v-if="repoInfo.date_ranges?.prs_open" class="stat-range">{{ formatRange(repoInfo.date_ranges.prs_open) }}</div>
         </div>
         <div class="card">
           <div class="stat">{{ repoInfo.pull_requests?.merged || 0 }}</div>
           <div class="stat-label">Merged PRs</div>
+          <div v-if="repoInfo.date_ranges?.prs_merged" class="stat-range">{{ formatRange(repoInfo.date_ranges.prs_merged) }}</div>
         </div>
       </div>
 
@@ -59,10 +63,16 @@ import { ref, onMounted, watch } from 'vue'
 import axios from 'axios'
 import ChartCard from '@/components/ChartCard.vue'
 
+interface DateRange {
+  earliest: string
+  latest: string
+}
+
 interface RepoInfo {
   issues: Record<string, number>
   pull_requests: Record<string, number>
   last_synced_at: string | null
+  date_ranges?: Record<string, DateRange>
 }
 
 const props = defineProps<{ owner: string; repo: string }>()
@@ -70,6 +80,11 @@ const repoInfo = ref<RepoInfo | null>(null)
 const loading = ref(true)
 const syncing = ref(false)
 const syncVersion = ref(0)
+
+function formatRange(range: DateRange): string {
+  const fmt = (s: string) => s.slice(0, 10)
+  return `${fmt(range.earliest)} — ${fmt(range.latest)}`
+}
 
 async function load() {
   loading.value = true
@@ -95,3 +110,11 @@ async function triggerSync() {
 onMounted(load)
 watch(() => [props.owner, props.repo], load)
 </script>
+
+<style scoped>
+.stat-range {
+  font-size: 0.75rem;
+  color: #586069;
+  margin-top: 0.25rem;
+}
+</style>
