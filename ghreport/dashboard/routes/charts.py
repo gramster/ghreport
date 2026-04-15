@@ -17,7 +17,13 @@ from ...core.analyzer import (
     top_files_data,
     top_terms_data,
 )
-from ..cache import get_cached_issues, get_cached_prs
+from ..cache import (
+    filter_active_issues,
+    filter_active_prs,
+    get_cached_issues,
+    get_cached_prs,
+    parse_date_param,
+)
 
 router = APIRouter(prefix="/api/repos/{owner}/{repo}/charts", tags=["charts"])
 
@@ -36,14 +42,19 @@ async def chart_open_issues(
     repo: str,
     months: int = Query(12, ge=1, le=60),
     interval: int = Query(7, ge=1),
+    since: str | None = Query(None),
+    until: str | None = Query(None),
 ):
     """Time-series: open issue counts over time."""
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
 
     issues = await get_cached_issues(db, repo_id)
-    end = datetime.now(tz=timezone.utc)
-    start = end - timedelta(days=months * 30)
+    issues = filter_active_issues(issues, since_dt, until_dt)
+    end = until_dt or datetime.now(tz=timezone.utc)
+    start = since_dt or (end - timedelta(days=months * 30))
 
     return open_issue_counts_data(start, end, issues, bug_labels=["bug"],
                                   interval=interval)
@@ -54,12 +65,17 @@ async def chart_time_to_merge(
     request: Request,
     owner: str,
     repo: str,
+    since: str | None = Query(None),
+    until: str | None = Query(None),
 ):
     """Month-bucketed time-to-merge box-plot data."""
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
 
     prs = await get_cached_prs(db, repo_id, state="merged")
+    prs = filter_active_prs(prs, since_dt, until_dt)
     return time_to_merge_data(prs)
 
 
@@ -68,12 +84,17 @@ async def chart_time_to_close(
     request: Request,
     owner: str,
     repo: str,
+    since: str | None = Query(None),
+    until: str | None = Query(None),
 ):
     """Month-bucketed time-to-close-issues box-plot data."""
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
 
     issues = await get_cached_issues(db, repo_id, state="closed")
+    issues = filter_active_issues(issues, since_dt, until_dt)
     return time_to_close_issues_data(issues)
 
 
@@ -83,16 +104,22 @@ async def chart_time_to_response(
     owner: str,
     repo: str,
     months: int = Query(12, ge=1, le=60),
+    since: str | None = Query(None),
+    until: str | None = Query(None),
 ):
     """Month-bucketed time-to-first-response box-plot data."""
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
 
     open_issues = await get_cached_issues(db, repo_id, state="open")
     closed_issues = await get_cached_issues(db, repo_id, state="closed")
-    since = datetime.now(tz=timezone.utc) - timedelta(days=months * 30)
+    open_issues = filter_active_issues(open_issues, since_dt, until_dt)
+    closed_issues = filter_active_issues(closed_issues, since_dt, until_dt)
+    resp_since = since_dt or (datetime.now(tz=timezone.utc) - timedelta(days=months * 30))
 
-    return time_to_first_response_data(open_issues, closed_issues, since=since)
+    return time_to_first_response_data(open_issues, closed_issues, since=resp_since)
 
 
 @router.get("/label-frequency")
@@ -100,12 +127,17 @@ async def chart_label_frequency(
     request: Request,
     owner: str,
     repo: str,
+    since: str | None = Query(None),
+    until: str | None = Query(None),
 ):
     """Label frequency bar chart data."""
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
 
     issues = await get_cached_issues(db, repo_id, state="open")
+    issues = filter_active_issues(issues, since_dt, until_dt)
     return label_frequency_data(issues)
 
 
@@ -114,12 +146,17 @@ async def chart_files_changed(
     request: Request,
     owner: str,
     repo: str,
+    since: str | None = Query(None),
+    until: str | None = Query(None),
 ):
     """Month-bucketed files changed per PR data."""
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
 
     prs = await get_cached_prs(db, repo_id)
+    prs = filter_active_prs(prs, since_dt, until_dt)
     return files_changed_data(prs)
 
 
@@ -128,12 +165,17 @@ async def chart_lines_changed(
     request: Request,
     owner: str,
     repo: str,
+    since: str | None = Query(None),
+    until: str | None = Query(None),
 ):
     """Month-bucketed lines changed per PR data."""
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
 
     prs = await get_cached_prs(db, repo_id)
+    prs = filter_active_prs(prs, since_dt, until_dt)
     return lines_changed_data(prs)
 
 
@@ -143,12 +185,17 @@ async def chart_top_terms(
     owner: str,
     repo: str,
     min_count: int = Query(5, ge=1),
+    since: str | None = Query(None),
+    until: str | None = Query(None),
 ):
     """Term frequency data from issue titles (for word cloud)."""
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
 
     issues = await get_cached_issues(db, repo_id)
+    issues = filter_active_issues(issues, since_dt, until_dt)
     return top_terms_data(issues, min_count=min_count)
 
 
@@ -158,10 +205,15 @@ async def chart_top_files(
     owner: str,
     repo: str,
     min_count: int = Query(5, ge=1),
+    since: str | None = Query(None),
+    until: str | None = Query(None),
 ):
     """File change frequency data from PRs."""
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
 
     prs = await get_cached_prs(db, repo_id)
+    prs = filter_active_prs(prs, since_dt, until_dt)
     return top_files_data(prs, min_count=min_count)

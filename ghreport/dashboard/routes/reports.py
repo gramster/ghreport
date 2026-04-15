@@ -7,7 +7,14 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from ...core.analyzer import closed_issues_data, pr_activity_data, revisits_data
-from ..cache import get_cached_issues, get_cached_prs, get_cached_team_members
+from ..cache import (
+    filter_active_issues,
+    filter_active_prs,
+    get_cached_issues,
+    get_cached_prs,
+    get_cached_team_members,
+    parse_date_param,
+)
 
 router = APIRouter(prefix="/api/repos/{owner}/{repo}/reports", tags=["reports"])
 
@@ -39,14 +46,21 @@ async def report_revisits(
     stale: int = Query(30, ge=1),
     bug_label: str = Query("bug"),
     show_all: bool = Query(False),
+    since: str | None = Query(None),
+    until: str | None = Query(None),
 ):
     """Issue revisit report — which issues need team attention."""
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
 
     issues = await get_cached_issues(db, repo_id, state="open")
+    issues = filter_active_issues(issues, since_dt, until_dt)
     members = await get_cached_team_members(db, repo_id)
-    now = datetime.now(tz=timezone.utc)
+    now = until_dt or datetime.now(tz=timezone.utc)
+    if since_dt:
+        days = max(1, (now - since_dt).days)
 
     return revisits_data(now, owner, repo, issues, members,
                          bug_label=bug_label, days=days, stale=stale,
@@ -71,6 +85,11 @@ async def report_pr_activity(
     closed_prs = await get_cached_prs(db, repo_id, state="closed")
     merged_prs = await get_cached_prs(db, repo_id, state="merged")
     now, effective_days = _resolve_window(days, since, until)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
+    open_prs = filter_active_prs(open_prs, since_dt, until_dt)
+    closed_prs = filter_active_prs(closed_prs, since_dt, until_dt)
+    merged_prs = filter_active_prs(merged_prs, since_dt, until_dt)
 
     return pr_activity_data(now, owner, repo, open_prs,
                             closed_prs + merged_prs, days=effective_days,
@@ -92,5 +111,8 @@ async def report_closed_issues(
 
     closed_issues = await get_cached_issues(db, repo_id, state="closed")
     now, effective_days = _resolve_window(days, since, until)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
+    closed_issues = filter_active_issues(closed_issues, since_dt, until_dt)
 
     return closed_issues_data(now, owner, repo, closed_issues, days=effective_days)

@@ -20,38 +20,55 @@ from ...core.analyzer import (
     top_files_data,
     top_terms_data,
 )
-from ..cache import get_cached_issues, get_cached_prs, get_cached_team_members
+from ..cache import (
+    filter_active_issues,
+    filter_active_prs,
+    get_cached_issues,
+    get_cached_prs,
+    get_cached_team_members,
+    parse_date_param,
+)
 
 router = APIRouter(prefix="/api/aggregate", tags=["aggregate"])
 
 
-async def _collect_all_issues(request: Request, state: str | None = None):
-    """Collect issues across all repos."""
+async def _collect_all_issues(request: Request, state: str | None = None,
+                              since_dt=None, until_dt=None):
+    """Collect issues across all repos, optionally filtered by date."""
     db = request.app.state.db
     repos = await db.get_all_repos()
     all_issues = []
     for r in repos:
         issues = await get_cached_issues(db, r["id"], state=state)
+        issues = filter_active_issues(issues, since_dt, until_dt)
         all_issues.extend(issues)
     return all_issues
 
 
-async def _collect_all_prs(request: Request, state: str | None = None):
-    """Collect PRs across all repos."""
+async def _collect_all_prs(request: Request, state: str | None = None,
+                           since_dt=None, until_dt=None):
+    """Collect PRs across all repos, optionally filtered by date."""
     db = request.app.state.db
     repos = await db.get_all_repos()
     all_prs = []
     for r in repos:
         prs = await get_cached_prs(db, r["id"], state=state)
+        prs = filter_active_prs(prs, since_dt, until_dt)
         all_prs.extend(prs)
     return all_prs
 
 
 @router.get("/summary")
-async def aggregate_summary(request: Request):
+async def aggregate_summary(
+    request: Request,
+    since: str | None = Query(None),
+    until: str | None = Query(None),
+):
     """Combined issue/PR counts across all repos."""
     db = request.app.state.db
     repos = await db.get_all_repos()
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
 
     total_open_issues = 0
     total_closed_issues = 0
@@ -62,11 +79,11 @@ async def aggregate_summary(request: Request):
 
     for r in repos:
         rid = r["id"]
-        open_i = len(await get_cached_issues(db, rid, state="open"))
-        closed_i = len(await get_cached_issues(db, rid, state="closed"))
-        open_p = len(await get_cached_prs(db, rid, state="open"))
-        merged_p = len(await get_cached_prs(db, rid, state="merged"))
-        closed_p = len(await get_cached_prs(db, rid, state="closed"))
+        open_i = len(filter_active_issues(await get_cached_issues(db, rid, state="open"), since_dt, until_dt))
+        closed_i = len(filter_active_issues(await get_cached_issues(db, rid, state="closed"), since_dt, until_dt))
+        open_p = len(filter_active_prs(await get_cached_prs(db, rid, state="open"), since_dt, until_dt))
+        merged_p = len(filter_active_prs(await get_cached_prs(db, rid, state="merged"), since_dt, until_dt))
+        closed_p = len(filter_active_prs(await get_cached_prs(db, rid, state="closed"), since_dt, until_dt))
 
         total_open_issues += open_i
         total_closed_issues += closed_i
@@ -96,38 +113,43 @@ async def aggregate_chart(
     chart_type: str,
     months: int = Query(12, ge=1, le=60),
     min_count: int = Query(5, ge=1),
+    since: str | None = Query(None),
+    until: str | None = Query(None),
 ):
     """Cross-repo chart data (merged from all repos)."""
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
+
     if chart_type == "open-issues":
-        issues = await _collect_all_issues(request)
-        end = datetime.now(tz=timezone.utc)
-        start = end - timedelta(days=months * 30)
+        issues = await _collect_all_issues(request, since_dt=since_dt, until_dt=until_dt)
+        end = until_dt or datetime.now(tz=timezone.utc)
+        start = since_dt or (end - timedelta(days=months * 30))
         return open_issue_counts_data(start, end, issues, bug_labels=["bug"])
     elif chart_type == "time-to-merge":
-        prs = await _collect_all_prs(request, state="merged")
+        prs = await _collect_all_prs(request, state="merged", since_dt=since_dt, until_dt=until_dt)
         return time_to_merge_data(prs)
     elif chart_type == "time-to-close":
-        issues = await _collect_all_issues(request, state="closed")
+        issues = await _collect_all_issues(request, state="closed", since_dt=since_dt, until_dt=until_dt)
         return time_to_close_issues_data(issues)
     elif chart_type == "time-to-response":
-        open_issues = await _collect_all_issues(request, state="open")
-        closed_issues = await _collect_all_issues(request, state="closed")
-        since = datetime.now(tz=timezone.utc) - timedelta(days=months * 30)
-        return time_to_first_response_data(open_issues, closed_issues, since=since)
+        open_issues = await _collect_all_issues(request, state="open", since_dt=since_dt, until_dt=until_dt)
+        closed_issues = await _collect_all_issues(request, state="closed", since_dt=since_dt, until_dt=until_dt)
+        resp_since = since_dt or (datetime.now(tz=timezone.utc) - timedelta(days=months * 30))
+        return time_to_first_response_data(open_issues, closed_issues, since=resp_since)
     elif chart_type == "label-frequency":
-        issues = await _collect_all_issues(request, state="open")
+        issues = await _collect_all_issues(request, state="open", since_dt=since_dt, until_dt=until_dt)
         return label_frequency_data(issues)
     elif chart_type == "files-changed":
-        prs = await _collect_all_prs(request)
+        prs = await _collect_all_prs(request, since_dt=since_dt, until_dt=until_dt)
         return files_changed_data(prs)
     elif chart_type == "lines-changed":
-        prs = await _collect_all_prs(request)
+        prs = await _collect_all_prs(request, since_dt=since_dt, until_dt=until_dt)
         return lines_changed_data(prs)
     elif chart_type == "top-terms":
-        issues = await _collect_all_issues(request)
+        issues = await _collect_all_issues(request, since_dt=since_dt, until_dt=until_dt)
         return top_terms_data(issues, min_count=min_count)
     elif chart_type == "top-files":
-        prs = await _collect_all_prs(request)
+        prs = await _collect_all_prs(request, since_dt=since_dt, until_dt=until_dt)
         return top_files_data(prs, min_count=min_count)
     else:
         from fastapi import HTTPException
@@ -142,16 +164,23 @@ async def aggregate_report(
     stale: int = Query(30, ge=1),
     bug_label: str = Query("bug"),
     show_all: bool = Query(False),
+    since: str | None = Query(None),
+    until: str | None = Query(None),
 ):
     """Cross-repo report data."""
     db = request.app.state.db
     repos = await db.get_all_repos()
-    now = datetime.now(tz=timezone.utc)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
+    now = until_dt or datetime.now(tz=timezone.utc)
+    if since_dt:
+        days = max(1, (now - since_dt).days)
 
     if report_type == "revisits":
         results = []
         for r in repos:
             issues = await get_cached_issues(db, r["id"], state="open")
+            issues = filter_active_issues(issues, since_dt, until_dt)
             members = await get_cached_team_members(db, r["id"])
             result = revisits_data(now, r["owner"], r["name"], issues, members,
                                    bug_label=bug_label, days=days, stale=stale,
@@ -161,9 +190,9 @@ async def aggregate_report(
     elif report_type == "pr-activity":
         results = []
         for r in repos:
-            open_prs = await get_cached_prs(db, r["id"], state="open")
-            closed_prs = await get_cached_prs(db, r["id"], state="closed")
-            merged_prs = await get_cached_prs(db, r["id"], state="merged")
+            open_prs = filter_active_prs(await get_cached_prs(db, r["id"], state="open"), since_dt, until_dt)
+            closed_prs = filter_active_prs(await get_cached_prs(db, r["id"], state="closed"), since_dt, until_dt)
+            merged_prs = filter_active_prs(await get_cached_prs(db, r["id"], state="merged"), since_dt, until_dt)
             result = pr_activity_data(now, r["owner"], r["name"],
                                       open_prs, closed_prs + merged_prs,
                                       days=days, show_all=show_all)
@@ -173,6 +202,7 @@ async def aggregate_report(
         results = []
         for r in repos:
             closed = await get_cached_issues(db, r["id"], state="closed")
+            closed = filter_active_issues(closed, since_dt, until_dt)
             result = closed_issues_data(now, r["owner"], r["name"], closed, days=days)
             results.append(result)
         return {"repos": results}

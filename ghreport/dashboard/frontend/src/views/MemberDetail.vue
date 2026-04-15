@@ -3,8 +3,6 @@
     <h2>Member: {{ login }}</h2>
 
     <div class="filters">
-      <label>Since: <input type="date" v-model="since" /></label>
-      <label>Until: <input type="date" v-model="until" /></label>
       <label>Repo:
         <select v-model="selectedRepo">
           <option value="">All repos</option>
@@ -74,14 +72,14 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import axios from 'axios'
+import { useDateRangeStore } from '@/stores/dateRange'
 
 interface RepoItem { owner: string; name: string }
 
 const props = defineProps<{ login: string }>()
 
+const dateRange = useDateRangeStore()
 const repos = ref<RepoItem[]>([])
-const since = ref('')
-const until = ref('')
 const selectedRepo = ref('')
 const activeTab = ref<'prs' | 'issues'>('prs')
 const loading = ref(true)
@@ -94,9 +92,7 @@ const issues = ref<any>(null)
 
 function buildParams() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const p: any = {}
-  if (since.value) p.since = since.value
-  if (until.value) p.until = until.value
+  const p: any = { ...dateRange.params }
   if (selectedRepo.value) {
     const [o, r] = selectedRepo.value.split('/')
     p.owner = o
@@ -128,7 +124,7 @@ onMounted(async () => {
   await load()
 })
 
-watch([since, until, selectedRepo], load)
+watch([selectedRepo, () => dateRange.since, () => dateRange.until], load)
 </script>
 
 <style scoped>

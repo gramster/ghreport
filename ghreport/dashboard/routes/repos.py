@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
+
+from ..cache import (
+    filter_active_issues,
+    filter_active_prs,
+    get_cached_issues,
+    get_cached_prs,
+    parse_date_param,
+)
 
 router = APIRouter(prefix="/api/repos", tags=["repos"])
 
@@ -72,24 +80,31 @@ async def list_repos(request: Request):
 
 
 @router.get("/{owner}/{repo}")
-async def get_repo(request: Request, owner: str, repo: str):
+async def get_repo(
+    request: Request,
+    owner: str,
+    repo: str,
+    since: str | None = Query(None),
+    until: str | None = Query(None),
+):
     """Get summary for a single repository."""
     db = request.app.state.db
     repo_id = await db.get_repo_id(owner, repo)
     if not repo_id:
         raise HTTPException(404, f"Repository {owner}/{repo} not found")
 
-    ic = await db.db.execute(
-        "SELECT state, COUNT(*) as cnt FROM issues WHERE repo_id = ? GROUP BY state",
-        (repo_id,),
-    )
-    issue_counts = {row["state"]: row["cnt"] for row in await ic.fetchall()}
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
 
-    pc = await db.db.execute(
-        "SELECT state, COUNT(*) as cnt FROM pull_requests WHERE repo_id = ? GROUP BY state",
-        (repo_id,),
-    )
-    pr_counts = {row["state"]: row["cnt"] for row in await pc.fetchall()}
+    issue_counts = {}
+    for state in ("open", "closed"):
+        items = await get_cached_issues(db, repo_id, state=state)
+        issue_counts[state] = len(filter_active_issues(items, since_dt, until_dt))
+
+    pr_counts = {}
+    for state in ("open", "closed", "merged"):
+        items = await get_cached_prs(db, repo_id, state=state)
+        pr_counts[state] = len(filter_active_prs(items, since_dt, until_dt))
 
     repo_row = await (await db.db.execute(
         "SELECT * FROM repos WHERE id = ?", (repo_id,)

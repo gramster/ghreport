@@ -2,10 +2,6 @@
   <div>
     <div class="title-bar">
       <h2>Dashboard</h2>
-      <div class="date-range">
-        <label>Since: <input type="date" v-model="dateRangeStore.since" /></label>
-        <label>Until: <input type="date" v-model="dateRangeStore.until" /></label>
-      </div>
     </div>
     <div v-if="loading" class="loading">Loading...</div>
     <template v-else>
@@ -69,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import axios from 'axios'
 import { useReposStore } from '@/stores/repos'
 import { useDateRangeStore } from '@/stores/dateRange'
@@ -98,7 +94,9 @@ const addError = ref<string | null>(null)
 async function load() {
   loading.value = true
   try {
-    const { data } = await axios.get<AggSummary>('/api/aggregate/summary')
+    const { data } = await axios.get<AggSummary>('/api/aggregate/summary', {
+      params: dateRangeStore.params,
+    })
     summary.value = data
   } finally {
     loading.value = false
@@ -136,6 +134,7 @@ async function removeRepo(owner: string, name: string) {
 }
 
 onMounted(load)
+watch(() => [dateRangeStore.since, dateRangeStore.until], load)
 </script>
 
 <style scoped>
@@ -147,20 +146,4 @@ onMounted(load)
   margin-bottom: 0.5rem;
 }
 .title-bar h2 { margin: 0; }
-.date-range {
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-}
-.date-range label {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.9rem;
-}
-.date-range input {
-  padding: 0.35rem;
-  border: 1px solid #e1e4e8;
-  border-radius: 4px;
-}
 </style>

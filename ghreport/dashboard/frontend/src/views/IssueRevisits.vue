@@ -40,6 +40,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import axios from 'axios'
+import { useDateRangeStore } from '@/stores/dateRange'
 
 interface RevisitIssue {
   number: number; title: string; created_by: string; created_at: string; star: boolean
@@ -51,6 +52,7 @@ interface RevisitsData {
 }
 
 const props = defineProps<{ owner: string; repo: string }>()
+const dateRange = useDateRangeStore()
 const data = ref<RevisitsData | null>(null)
 const loading = ref(true)
 const activeTab = ref<'bugs' | 'non_bugs'>('bugs')
@@ -63,7 +65,7 @@ async function load() {
   loading.value = true
   try {
     const { data: d } = await axios.get(`/api/repos/${props.owner}/${props.repo}/reports/revisits`, {
-      params: { show_all: true },
+      params: { show_all: true, ...dateRange.params },
     })
     data.value = d
   } finally {
@@ -73,6 +75,7 @@ async function load() {
 
 onMounted(load)
 watch(() => [props.owner, props.repo], load)
+watch(() => [dateRange.since, dateRange.until], load)
 </script>
 
 <style scoped>

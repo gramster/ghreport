@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from ..core.fetcher import get_raw_issues, get_raw_pull_requests
 from ..core.models import Event, Issue, PullRequest
@@ -287,3 +287,60 @@ async def get_sync_status(db: Database, repo_id: int) -> dict | None:
     )
     row = await cursor.fetchone()
     return dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# Date-range filtering helpers
+# ---------------------------------------------------------------------------
+
+def parse_date_param(s: str | None, end_of_day: bool = False) -> datetime | None:
+    """Parse a date string (e.g. '2025-01-15') into a timezone-aware datetime."""
+    if not s:
+        return None
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if end_of_day and len(s) <= 10:
+        dt = dt.replace(hour=23, minute=59, second=59)
+    return dt
+
+
+def filter_active_issues(
+    issues: list[Issue],
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> list[Issue]:
+    """Keep issues that were active (open at any point) during [since, until].
+
+    An issue is active in the window if its lifetime overlaps:
+    created_at <= until AND (closed_at is NULL OR closed_at >= since).
+    """
+    if not since and not until:
+        return issues
+    result = []
+    for issue in issues:
+        if until and issue.created_at and issue.created_at > until:
+            continue
+        if since and issue.closed_at and issue.closed_at < since:
+            continue
+        result.append(issue)
+    return result
+
+
+def filter_active_prs(
+    prs: list[PullRequest],
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> list[PullRequest]:
+    """Keep PRs that were active during [since, until]."""
+    if not since and not until:
+        return prs
+    result = []
+    for pr in prs:
+        if until and pr.created_at and pr.created_at > until:
+            continue
+        end = pr.merged_at or pr.closed_at
+        if since and end and end < since:
+            continue
+        result.append(pr)
+    return result

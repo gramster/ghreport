@@ -59,6 +59,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import axios from 'axios'
+import { useDateRangeStore } from '@/stores/dateRange'
 import ChartCard from '@/components/ChartCard.vue'
 
 interface DateRange {
@@ -74,6 +75,7 @@ interface RepoInfo {
 }
 
 const props = defineProps<{ owner: string; repo: string }>()
+const dateRange = useDateRangeStore()
 const repoInfo = ref<RepoInfo | null>(null)
 const loading = ref(true)
 const syncing = ref(false)
@@ -87,7 +89,9 @@ function formatRange(range: DateRange): string {
 async function load() {
   loading.value = true
   try {
-    const { data } = await axios.get(`/api/repos/${props.owner}/${props.repo}`)
+    const { data } = await axios.get(`/api/repos/${props.owner}/${props.repo}`, {
+      params: dateRange.params,
+    })
     repoInfo.value = data
   } finally {
     loading.value = false
@@ -107,6 +111,7 @@ async function triggerSync() {
 
 onMounted(load)
 watch(() => [props.owner, props.repo], load)
+watch(() => [dateRange.since, dateRange.until], load)
 </script>
 
 <style scoped>
