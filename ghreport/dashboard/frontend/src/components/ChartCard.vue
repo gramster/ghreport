@@ -59,5 +59,5 @@ async function fetchData() {
 }
 
 onMounted(fetchData)
-watch(() => [dateRange.since, dateRange.until], fetchData)
+watch(() => [dateRange.since, dateRange.until, dateRange.coverageVersion], fetchData)
 </script>

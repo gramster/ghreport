@@ -23,8 +23,12 @@ def _parse_dt(s: str | None) -> datetime | None:
 
 
 async def sync_repo(db: Database, owner: str, repo: str, token: str,
-                    team: str | None = None, force: bool = False) -> dict:
+                    team: str | None = None, force: bool = False,
+                    backfill_since: datetime | None = None) -> dict:
     """Fetch data from GitHub and upsert into SQLite.
+
+    If *backfill_since* is given, only fetch data created/updated since that
+    date — used when the user's date-range extends before the cached window.
 
     Returns a summary dict with counts.
     """
@@ -41,12 +45,18 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
 
     # Determine since date for incremental sync
     since = None
-    if not force:
+    if backfill_since:
+        # Targeted backfill for a specific date range
+        since = backfill_since
+    elif not force:
         row = await (await db.db.execute(
             "SELECT last_synced_at FROM repos WHERE id = ?", (repo_id,)
         )).fetchone()
         if row and row[0]:
             since = datetime.fromisoformat(row[0]) - timedelta(days=1)
+
+    # Track the effective search boundary for data_since
+    effective_since = since or (datetime.now(tz=timezone.utc) - timedelta(days=365 * 10))
 
     # Fetch team members
     members = get_members(owner, repo, token)
@@ -104,6 +114,7 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
         (completed_str, issues_count, prs_count, sync_id),
     )
     await db.update_last_synced(repo_id, completed_str)
+    await db.update_data_since(repo_id, effective_since.isoformat())
     await db.db.commit()
 
     return {"issues_fetched": issues_count, "prs_fetched": prs_count}

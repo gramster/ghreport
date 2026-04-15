@@ -124,7 +124,7 @@ onMounted(async () => {
   await load()
 })
 
-watch([selectedRepo, () => dateRange.since, () => dateRange.until], load)
+watch([selectedRepo, () => dateRange.since, () => dateRange.until, () => dateRange.coverageVersion], load)
 </script>
 
 <style scoped>

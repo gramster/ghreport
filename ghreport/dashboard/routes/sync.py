@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
-from ..cache import get_sync_status, sync_repo
+from ..cache import get_sync_status, parse_date_param, sync_repo
 
 router = APIRouter(tags=["sync"])
 
@@ -56,3 +57,61 @@ async def get_repo_sync_status(request: Request, owner: str, repo: str):
     if not status:
         return {"status": "never_synced"}
     return status
+
+
+@router.post("/api/coverage/check")
+async def check_date_coverage(
+    request: Request,
+    since: str | None = Query(None),
+):
+    """Check if cached data covers the requested date range.
+
+    If any repo's data starts later than the requested *since*, trigger a
+    background backfill for those repos and return ``backfilling: true``.
+    """
+    if not since:
+        return {"covered": True, "backfilling": False}
+
+    since_dt = parse_date_param(since)
+    if not since_dt:
+        return {"covered": True, "backfilling": False}
+
+    db = request.app.state.db
+    settings = request.app.state.settings
+    scheduler = request.app.state.scheduler
+    repos = await db.get_all_repos()
+
+    gaps: list[dict] = []
+    for r in repos:
+        owner, name = r["owner"], r["name"]
+
+        # If a backfill is currently running, report it
+        if scheduler.is_backfilling(owner, name):
+            gaps.append({"owner": owner, "name": name, "reason": "backfilling"})
+            continue
+
+        data_since = await db.get_data_since(r["id"])
+        if not data_since:
+            # Never synced — the initial sync will cover it
+            if not r["last_synced_at"]:
+                gaps.append({"owner": owner, "name": name, "reason": "never_synced"})
+            continue
+        data_since_dt = datetime.fromisoformat(data_since)
+        if data_since_dt.tzinfo is None:
+            data_since_dt = data_since_dt.replace(tzinfo=timezone.utc)
+        if since_dt < data_since_dt:
+            gaps.append({
+                "owner": owner, "name": name,
+                "data_since": data_since,
+                "requested_since": since,
+            })
+            # Trigger backfill in background
+            asyncio.create_task(
+                scheduler.backfill(r["owner"], r["name"], since_dt)
+            )
+
+    return {
+        "covered": len(gaps) == 0,
+        "backfilling": len(gaps) > 0,
+        "gaps": gaps,
+    }

@@ -79,5 +79,5 @@ async function load() {
 
 onMounted(load)
 watch(() => [props.owner, props.repo], load)
-watch(() => [dateRange.since, dateRange.until], load)
+watch(() => [dateRange.since, dateRange.until, dateRange.coverageVersion], load)
 </script>

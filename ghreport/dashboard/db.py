@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS repos (
     owner TEXT NOT NULL,
     name TEXT NOT NULL,
     last_synced_at TEXT,
+    data_since TEXT,
     config_json TEXT,
     UNIQUE(owner, name)
 );
@@ -114,7 +115,18 @@ class Database:
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.executescript(SCHEMA)
+        # Migrations — add columns if missing
+        await self._migrate()
         await self._db.commit()
+
+    async def _migrate(self):
+        """Run lightweight column migrations."""
+        cursor = await self._db.execute("PRAGMA table_info(repos)")
+        cols = {row[1] for row in await cursor.fetchall()}
+        if "data_since" not in cols:
+            await self._db.execute(
+                "ALTER TABLE repos ADD COLUMN data_since TEXT"
+            )
 
     async def close(self):
         if self._db:
@@ -178,4 +190,21 @@ class Database:
         await self.db.execute(
             "UPDATE repos SET last_synced_at = ? WHERE id = ?", (when, repo_id)
         )
+
+    async def update_data_since(self, repo_id: int, since_iso: str):
+        """Update data_since only if the new value is earlier."""
+        row = await (await self.db.execute(
+            "SELECT data_since FROM repos WHERE id = ?", (repo_id,)
+        )).fetchone()
+        if not row or not row[0] or since_iso < row[0]:
+            await self.db.execute(
+                "UPDATE repos SET data_since = ? WHERE id = ?",
+                (since_iso, repo_id),
+            )
+
+    async def get_data_since(self, repo_id: int) -> str | None:
+        row = await (await self.db.execute(
+            "SELECT data_since FROM repos WHERE id = ?", (repo_id,)
+        )).fetchone()
+        return row[0] if row else None
         await self.db.commit()

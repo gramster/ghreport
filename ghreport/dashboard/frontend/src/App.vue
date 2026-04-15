@@ -6,6 +6,7 @@
       <div class="nav-dates">
         <label>Since <input type="date" v-model="dateRange.since" /></label>
         <label>Until <input type="date" v-model="dateRange.until" /></label>
+        <span v-if="dateRange.backfilling" class="backfill-indicator" title="Fetching older data...">⟳</span>
       </div>
       <RepoSelector />
     </nav>
@@ -36,6 +37,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .nav-dates { display: flex; gap: 0.75rem; align-items: center; margin-left: auto; }
 .nav-dates label { display: flex; align-items: center; gap: 0.3rem; color: #ffffffcc; font-size: 0.85rem; }
 .nav-dates input { padding: 0.25rem 0.4rem; border: 1px solid #586069; border-radius: 4px; background: #2f363d; color: #fff; font-size: 0.85rem; }
+.backfill-indicator { animation: spin 1s linear infinite; font-size: 1.1rem; color: #f9826c; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .content { max-width: 1200px; margin: 1.5rem auto; padding: 0 1rem; }
 a { color: #0366d6; }
 table { width: 100%; border-collapse: collapse; margin: 1rem 0; }

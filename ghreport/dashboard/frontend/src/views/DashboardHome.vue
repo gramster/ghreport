@@ -134,7 +134,7 @@ async function removeRepo(owner: string, name: string) {
 }
 
 onMounted(load)
-watch(() => [dateRangeStore.since, dateRangeStore.until], load)
+watch(() => [dateRangeStore.since, dateRangeStore.until, dateRangeStore.coverageVersion], load)
 </script>
 
 <style scoped>
