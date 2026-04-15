@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 from ..core.fetcher import get_raw_issues, get_raw_pull_requests
@@ -10,6 +11,8 @@ from ..core.models import Event, Issue, PullRequest
 from ..core.parser import parse_raw_issue, parse_raw_pull_request, utc_to_local, format_date
 from ..core.teams import get_members
 from .db import Database
+
+logger = logging.getLogger(__name__)
 
 
 def _dt_str(dt: datetime | None) -> str | None:
@@ -20,6 +23,27 @@ def _parse_dt(s: str | None) -> datetime | None:
     if not s:
         return None
     return datetime.fromisoformat(s)
+
+
+def _collect_copilot_users(raw: dict, found: set[str]):
+    """Scan a raw issue/PR for usernames containing 'copilot' (case-insensitive)."""
+    for field in ('author', 'mergedBy', 'actor', 'assignee'):
+        node = raw.get(field)
+        if isinstance(node, dict):
+            login = node.get('login', '')
+            if login and 'copilot' in login.lower():
+                found.add(login)
+    # Also check timeline comments/events
+    timeline = raw.get('timelineItems', {}).get('nodes', [])
+    for event in timeline:
+        if not isinstance(event, dict):
+            continue
+        for field in ('author', 'actor', 'assignee'):
+            node = event.get(field)
+            if isinstance(node, dict):
+                login = node.get('login', '')
+                if login and 'copilot' in login.lower():
+                    found.add(login)
 
 
 async def sync_repo(db: Database, owner: str, repo: str, token: str,
@@ -66,6 +90,11 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
         else:
             members = set(team.split(','))
 
+    # Include common team members so response-time calculations are accurate
+    common_cursor = await db.db.execute("SELECT login FROM common_team_members")
+    common_rows = await common_cursor.fetchall()
+    members.update(r["login"] for r in common_rows)
+
     # Store team members
     await db.db.execute("DELETE FROM team_members WHERE repo_id = ?", (repo_id,))
     for login in members:
@@ -79,6 +108,7 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
     # newly created, recently closed, commented, and relabeled issues
     # without re-fetching all unchanged open issues.
     issues_count = 0
+    copilot_users: set[str] = set()
     incremental = since is not None
     for state in ('open', 'closed'):
         raw_issues = await get_raw_issues(
@@ -86,6 +116,7 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
             since=since, use_updated=incremental,
         )
         for raw in raw_issues:
+            _collect_copilot_users(raw, copilot_users)
             parsed = parse_raw_issue(raw, members)
             if not parsed:
                 continue
@@ -99,12 +130,19 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
         s = since if (incremental or state != 'open') else None
         raw_prs = await get_raw_pull_requests(owner, repo, token, state=state, since=s)
         for raw in raw_prs:
+            _collect_copilot_users(raw, copilot_users)
             parsed = parse_raw_pull_request(raw)
             if not parsed:
                 continue
             prs_count += 1
             pr_state = 'merged' if parsed.merged_at else ('closed' if parsed.closed_at else 'open')
             await _upsert_pr(db, repo_id, parsed, raw, pr_state)
+
+    if copilot_users:
+        logger.info(
+            "Copilot-related users in %s/%s: %s",
+            owner, repo, ", ".join(sorted(copilot_users)),
+        )
 
     # Update sync status
     completed_str = datetime.utcnow().isoformat()

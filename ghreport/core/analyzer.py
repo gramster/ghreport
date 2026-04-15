@@ -254,15 +254,23 @@ def open_issue_counts_data(start: datetime, end: datetime, issues: list[Issue],
 
 
 def time_to_merge_data(pull_requests: list[PullRequest]) -> dict[str, Any]:
-    """Return month-bucketed time-to-merge data for box plots."""
-    ranges = calculate_ranges(pull_requests, lambda x: x.created_at,
+    """Return month-bucketed time-to-merge data for box plots.
+
+    Buckets by the month the PR was *merged* (not created) so the chart
+    answers "how long did PRs merged in month X take?"
+    """
+    ranges = calculate_ranges(pull_requests, lambda x: x.merged_at,
                               lambda x: date_diff(x.merged_at, x.created_at).days)
     return {"months": {k: sorted(v) for k, v in sorted(ranges.items())}}
 
 
 def time_to_close_issues_data(issues: list[Issue]) -> dict[str, Any]:
-    """Return month-bucketed time-to-close data for box plots."""
-    ranges = calculate_ranges(issues, lambda x: x.created_at,
+    """Return month-bucketed time-to-close data for box plots.
+
+    Buckets by the month the issue was *closed* (not created) so the chart
+    answers "how long did issues closed in month X take?"
+    """
+    ranges = calculate_ranges(issues, lambda x: x.closed_at,
                               lambda x: date_diff(x.closed_at, x.created_at).days)
     return {"months": {k: sorted(v) for k, v in sorted(ranges.items())}}
 

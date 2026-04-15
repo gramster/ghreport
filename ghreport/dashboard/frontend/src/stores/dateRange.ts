@@ -6,12 +6,24 @@ function fmt(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
+function loadSaved(key: string, fallback: string): string {
+  try {
+    const v = localStorage.getItem(key)
+    if (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v
+  } catch { /* ignore */ }
+  return fallback
+}
+
 export const useDateRangeStore = defineStore('dateRange', () => {
   const now = new Date()
   const weekAgo = new Date(now.getTime() - 7 * 86400000)
-  const since = ref(fmt(weekAgo))
-  const until = ref(fmt(now))
+  const since = ref(loadSaved('ghreport_since', fmt(weekAgo)))
+  const until = ref(loadSaved('ghreport_until', fmt(now)))
   const backfilling = ref(false)
+
+  // Persist to localStorage on change
+  watch(since, (v) => { try { localStorage.setItem('ghreport_since', v) } catch { /* */ } })
+  watch(until, (v) => { try { localStorage.setItem('ghreport_until', v) } catch { /* */ } })
 
   const params = computed(() => {
     const p: Record<string, string> = {}
@@ -29,7 +41,10 @@ export const useDateRangeStore = defineStore('dateRange', () => {
 
   // When 'since' changes, check if we need to backfill older data
   let checkTimer: ReturnType<typeof setTimeout> | null = null
+  // Track the last since value we confirmed coverage for, to skip redundant checks
+  let lastCoveredSince: string | null = null
   watch(since, (val) => {
+    if (val === lastCoveredSince) return
     if (checkTimer) clearTimeout(checkTimer)
     // Debounce to avoid rapid-fire calls while typing
     checkTimer = setTimeout(() => checkCoverage(val), 500)
@@ -45,6 +60,9 @@ export const useDateRangeStore = defineStore('dateRange', () => {
         backfilling.value = true
         // Poll until backfill completes, then clear flag to trigger re-render
         pollUntilCovered(sinceVal)
+      } else {
+        // Data is already covered — remember so we don't re-check
+        lastCoveredSince = sinceVal
       }
     } catch {
       // Silently ignore — data will still show whatever is cached
