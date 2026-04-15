@@ -1,9 +1,15 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
+function fmt(d: Date): string {
+  return d.toISOString().slice(0, 10)
+}
+
 export const useDateRangeStore = defineStore('dateRange', () => {
-  const since = ref('')
-  const until = ref('')
+  const now = new Date()
+  const weekAgo = new Date(now.getTime() - 7 * 86400000)
+  const since = ref(fmt(weekAgo))
+  const until = ref(fmt(now))
 
   const params = computed(() => {
     const p: Record<string, string> = {}
