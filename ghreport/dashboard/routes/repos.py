@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
@@ -124,13 +126,18 @@ async def get_repo(
 
 @router.post("")
 async def add_repo(request: Request, body: AddRepoRequest):
-    """Add a new repository to track."""
+    """Add a new repository to track and trigger initial sync."""
     db = request.app.state.db
     existing = await db.get_repo_id(body.owner, body.repo)
     if existing:
         raise HTTPException(409, f"Repository {body.owner}/{body.repo} already exists")
     repo_id = await db.ensure_repo(body.owner, body.repo)
-    return {"owner": body.owner, "name": body.repo, "id": repo_id}
+
+    # Trigger initial sync in the background
+    scheduler = request.app.state.scheduler
+    asyncio.create_task(scheduler.sync_one(body.owner, body.repo))
+
+    return {"owner": body.owner, "name": body.repo, "id": repo_id, "syncing": True}
 
 
 @router.delete("/{owner}/{repo}")

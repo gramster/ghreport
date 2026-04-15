@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     github_token: str = ""
     repos: list[RepoConfig] = []
     db_path: str = "data/ghreport.db"
-    sync_interval_minutes: int = 60
+    sync_interval_minutes: int = 10
     timezone: str = "America/Los_Angeles"
     host: str = "0.0.0.0"
     port: int = 8000

@@ -64,11 +64,17 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
             (repo_id, login),
         )
 
-    # Fetch and store issues (open always re-fetched, closed incremental)
+    # Fetch and store issues
+    # For incremental sync, use updated:>= for all states to catch
+    # newly created, recently closed, commented, and relabeled issues
+    # without re-fetching all unchanged open issues.
     issues_count = 0
+    incremental = since is not None
     for state in ('open', 'closed'):
-        s = since if state == 'closed' else None
-        raw_issues = await get_raw_issues(owner, repo, token, state=state, since=s)
+        raw_issues = await get_raw_issues(
+            owner, repo, token, state=state,
+            since=since, use_updated=incremental,
+        )
         for raw in raw_issues:
             parsed = parse_raw_issue(raw, members)
             if not parsed:
@@ -77,9 +83,10 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
             await _upsert_issue(db, repo_id, parsed, raw, state)
 
     # Fetch and store PRs
+    # For incremental sync, only fetch PRs updated since last sync.
     prs_count = 0
     for state in ('open', 'closed', 'merged'):
-        s = since if state != 'open' else None
+        s = since if (incremental or state != 'open') else None
         raw_prs = await get_raw_pull_requests(owner, repo, token, state=state, since=s)
         for raw in raw_prs:
             parsed = parse_raw_pull_request(raw)

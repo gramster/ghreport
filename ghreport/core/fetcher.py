@@ -8,7 +8,7 @@ import pytz
 
 issues_with_comments_query = """
 query ($cursor: String, $chunk: Int) {{
-  search(query: "repo:{owner}/{repo} type:issue state:{state} created:>={since}", type:ISSUE, first: $chunk, after: $cursor) {{
+  search(query: "repo:{owner}/{repo} type:issue state:{state} {since_filter}", type:ISSUE, first: $chunk, after: $cursor) {{
     issueCount
     pageInfo {{
       endCursor
@@ -91,7 +91,7 @@ query ($cursor: String, $chunk: Int) {{
 
 issues_without_comments_query = """
 query ($cursor: String, $chunk: Int) {{
-  search(query: "repo:{owner}/{repo} type:issue state:{state} created:>={since}", type:ISSUE first: $chunk, after: $cursor) {{
+  search(query: "repo:{owner}/{repo} type:issue state:{state} {since_filter}", type:ISSUE first: $chunk, after: $cursor) {{
     issueCount
     pageInfo {{
       endCursor
@@ -303,7 +303,8 @@ async def get_raw_pull_requests(owner: str, repo: str, token: str, state: str = 
 
 async def get_raw_issues(owner: str, repo: str, token: str, state: str = 'open',
                          chunk: int = 100, include_comments: bool = True,
-                         since: datetime | None = None, verbose: bool = False,
+                         since: datetime | None = None, use_updated: bool = False,
+                         verbose: bool = False,
                          debug_log_list: list[str] | None = None) -> list[dict]:
     cursor = None
     issues = []
@@ -316,15 +317,17 @@ async def get_raw_issues(owner: str, repo: str, token: str, state: str = 'open',
         since = datetime.now() - timedelta(days=365 * 10)
 
     since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%d')
+    filter_key = 'updated' if use_updated else 'created'
+    since_filter = f'{filter_key}:>={since_str}'
 
     async with httpx.AsyncClient(timeout=60) as client:
         gh = gidgethub.httpx.GitHubAPI(client, owner, oauth_token=token)
         reset_at = None
 
         if include_comments:
-            query = issues_with_comments_query.format(owner=owner, repo=repo, state=state, since=since_str)
+            query = issues_with_comments_query.format(owner=owner, repo=repo, state=state, since_filter=since_filter)
         else:
-            query = issues_without_comments_query.format(owner=owner, repo=repo, state=state, since=since_str)
+            query = issues_without_comments_query.format(owner=owner, repo=repo, state=state, since_filter=since_filter)
 
         while True:
             result = await gh.graphql(query, cursor=cursor, chunk=chunk)
