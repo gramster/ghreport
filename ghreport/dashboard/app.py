@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import Settings, load_settings
 from .db import Database
 from .scheduler import SyncScheduler
+from .cache import scan_copilot_users
 from .routes import repos, issues, prs, reports, charts, aggregate, sync, team, members
 
 
@@ -31,6 +32,9 @@ async def lifespan(app: FastAPI):
     scheduler = SyncScheduler(db, settings)
     scheduler.start()
     app.state.scheduler = scheduler
+
+    # Scan cached data for copilot users
+    await scan_copilot_users(db)
 
     yield
 

@@ -139,9 +139,9 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
             await _upsert_pr(db, repo_id, parsed, raw, pr_state)
 
     if copilot_users:
-        logger.info(
-            "Copilot-related users in %s/%s: %s",
-            owner, repo, ", ".join(sorted(copilot_users)),
+        print(
+            f"[copilot] Users in {owner}/{repo}: {', '.join(sorted(copilot_users))}",
+            flush=True,
         )
 
     # Update sync status
@@ -343,6 +343,39 @@ async def get_sync_status(db: Database, repo_id: int) -> dict | None:
     )
     row = await cursor.fetchone()
     return dict(row) if row else None
+
+
+async def scan_copilot_users(db: Database) -> dict[str, set[str]]:
+    """Scan cached raw_json in DB for usernames containing 'copilot'.
+
+    Returns {repo_slug: {login, ...}}.
+    """
+    import re
+    pattern = re.compile(r'"login"\s*:\s*"([^"]*copilot[^"]*)"', re.IGNORECASE)
+    result: dict[str, set[str]] = {}
+
+    repos = await db.get_all_repos()
+    for r in repos:
+        slug = f"{r['owner']}/{r['name']}"
+        found: set[str] = set()
+
+        for table in ('issues', 'pull_requests'):
+            cursor = await db.db.execute(
+                f"SELECT raw_json FROM {table} WHERE repo_id = ?", (r['id'],)
+            )
+            async for row in cursor:
+                raw = row[0] or ''
+                for m in pattern.finditer(raw):
+                    found.add(m.group(1))
+
+        if found:
+            result[slug] = found
+            print(
+                f"[copilot] Cached users in {slug}: {', '.join(sorted(found))}",
+                flush=True,
+            )
+
+    return result
 
 
 # ---------------------------------------------------------------------------

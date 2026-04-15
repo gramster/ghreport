@@ -1,9 +1,35 @@
 """Async GitHub data fetching via GraphQL."""
 
+import asyncio
+import logging
 from datetime import datetime, timedelta
 import httpx
+import gidgethub
 import gidgethub.httpx
 import pytz
+
+logger = logging.getLogger(__name__)
+
+# Retry settings for transient GitHub errors (rate limits, HTML responses)
+_MAX_RETRIES = 5
+_RETRY_BASE_DELAY = 5  # seconds
+
+
+async def _graphql_with_retry(gh, query, *, cursor=None, chunk=100):
+    """Call gh.graphql with exponential-backoff retry on transient errors."""
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return await gh.graphql(query, cursor=cursor, chunk=chunk)
+        except (gidgethub.GraphQLResponseTypeError, httpx.HTTPStatusError) as exc:
+            if attempt == _MAX_RETRIES - 1:
+                raise
+            delay = _RETRY_BASE_DELAY * (2 ** attempt)
+            logger.warning(
+                "GitHub API error (attempt %d/%d), retrying in %ds: %s",
+                attempt + 1, _MAX_RETRIES, delay, exc,
+            )
+            await asyncio.sleep(delay)
+    raise RuntimeError("unreachable")
 
 
 issues_with_comments_query = """
@@ -277,7 +303,7 @@ async def get_raw_pull_requests(owner: str, repo: str, token: str, state: str = 
                                                since_filter=since_filter)
 
         while True:
-            result = await gh.graphql(query, cursor=cursor, chunk=chunk)
+            result = await _graphql_with_retry(gh, query, cursor=cursor, chunk=chunk)
             if debug_log_list is not None:
                 debug_log_list.append(f'Query: {query}\n\nResponse: {result}\n\n')
 
@@ -330,7 +356,7 @@ async def get_raw_issues(owner: str, repo: str, token: str, state: str = 'open',
             query = issues_without_comments_query.format(owner=owner, repo=repo, state=state, since_filter=since_filter)
 
         while True:
-            result = await gh.graphql(query, cursor=cursor, chunk=chunk)
+            result = await _graphql_with_retry(gh, query, cursor=cursor, chunk=chunk)
 
             if debug_log_list is not None:
                 debug_log_list.append(f'Query: {query}\n\nResponse: {result}\n\n')
