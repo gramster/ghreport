@@ -27,7 +27,14 @@ Install the dashboard dependencies:
 pip install ghreport[dashboard]
 ```
 
-Create a config file (see `config.example.toml`):
+### Running
+
+```
+export GH_TOKEN=your_github_token
+ghreport dashboard
+```
+
+On first run, a `config.toml` file is created automatically. Repos can be added from the web UI, or you can edit the config file directly:
 
 ```toml
 [[repos]]
@@ -36,19 +43,14 @@ name = "debugpy"
 bug_label = "bug"
 ```
 
-### Running
-
-```
-export GH_TOKEN=your_github_token
-ghreport dashboard -c config.toml
-```
+The database is also seeded with default common team members (`dependabot`, `app/copilot-swe-agent`) which can be managed from the Team page.
 
 The dashboard is available at `http://localhost:8000`. API docs are at `http://localhost:8000/docs`.
 
 Options:
 - `-p, --port` — Port (default: 8000)
 - `-H, --host` — Host (default: 0.0.0.0)
-- `-c, --config` — Path to TOML config file
+- `-c, --config` — Path to TOML config file (created if missing)
 
 ### Features
 
