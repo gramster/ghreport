@@ -75,8 +75,13 @@ async def _maybe_resync_for_roles(db: Database, scheduler: SyncScheduler):
     )
     repos_list = await db.get_all_repos()
     import asyncio
-    for r in repos_list:
-        asyncio.create_task(scheduler.force_sync_one(r["owner"], r["name"]))
+
+    async def _resync_all():
+        for r in repos_list:
+            await scheduler.force_sync_one(r["owner"], r["name"])
+            await asyncio.sleep(2)  # avoid rate-limiting between repos
+
+    asyncio.create_task(_resync_all())
 
 
 def create_app(config_path: str | None = None) -> FastAPI:

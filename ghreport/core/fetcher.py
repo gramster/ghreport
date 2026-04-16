@@ -20,7 +20,12 @@ async def _graphql_with_retry(gh, query, *, cursor=None, chunk=100):
     for attempt in range(_MAX_RETRIES):
         try:
             return await gh.graphql(query, cursor=cursor, chunk=chunk)
-        except (gidgethub.GraphQLResponseTypeError, httpx.HTTPStatusError) as exc:
+        except (
+            gidgethub.GraphQLResponseTypeError,
+            httpx.HTTPStatusError,
+            httpx.RemoteProtocolError,
+            httpx.ReadError,
+        ) as exc:
             if attempt == _MAX_RETRIES - 1:
                 raise
             delay = _RETRY_BASE_DELAY * (2 ** attempt)
