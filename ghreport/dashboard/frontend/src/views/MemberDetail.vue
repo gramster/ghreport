@@ -38,9 +38,18 @@
           </button>
         </div>
         <table v-if="filteredPrs.length">
-          <thead><tr><th>Repo</th><th>#</th><th>Title</th><th>Role</th><th>State</th><th>Created</th><th>Days</th><th>Lines</th></tr></thead>
+          <thead><tr>
+            <th class="sortable" @click="prSort.toggleSort('owner')">Repo{{ prSort.sortIndicator('owner') }}</th>
+            <th class="sortable" @click="prSort.toggleSort('number')">#{{ prSort.sortIndicator('number') }}</th>
+            <th class="sortable" @click="prSort.toggleSort('title')">Title{{ prSort.sortIndicator('title') }}</th>
+            <th>Role</th>
+            <th class="sortable" @click="prSort.toggleSort('state')">State{{ prSort.sortIndicator('state') }}</th>
+            <th class="sortable" @click="prSort.toggleSort('created_at')">Created{{ prSort.sortIndicator('created_at') }}</th>
+            <th class="sortable" @click="prSort.toggleSort('days_open')">Days{{ prSort.sortIndicator('days_open') }}</th>
+            <th class="sortable" @click="prSort.toggleSort('lines_changed')">Lines{{ prSort.sortIndicator('lines_changed') }}</th>
+          </tr></thead>
           <tbody>
-            <tr v-for="pr in filteredPrs" :key="`${pr.owner}/${pr.repo}/${pr.number}`">
+            <tr v-for="pr in prSort.sorted.value" :key="`${pr.owner}/${pr.repo}/${pr.number}`">
               <td>{{ pr.owner }}/{{ pr.repo }}</td>
               <td><a :href="`https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`" target="_blank">{{ pr.number }}</a></td>
               <td>{{ pr.title }}</td>
@@ -60,10 +69,17 @@
       </div>
 
       <div v-if="activeTab === 'issues' && issues">
-        <table v-if="issues.issues.length">
-          <thead><tr><th>Repo</th><th>#</th><th>Title</th><th>State</th><th>Created</th><th>Role</th></tr></thead>
+        <table v-if="issuesList.length">
+          <thead><tr>
+            <th class="sortable" @click="issueSort.toggleSort('owner')">Repo{{ issueSort.sortIndicator('owner') }}</th>
+            <th class="sortable" @click="issueSort.toggleSort('number')">#{{ issueSort.sortIndicator('number') }}</th>
+            <th class="sortable" @click="issueSort.toggleSort('title')">Title{{ issueSort.sortIndicator('title') }}</th>
+            <th class="sortable" @click="issueSort.toggleSort('state')">State{{ issueSort.sortIndicator('state') }}</th>
+            <th class="sortable" @click="issueSort.toggleSort('created_at')">Created{{ issueSort.sortIndicator('created_at') }}</th>
+            <th>Role</th>
+          </tr></thead>
           <tbody>
-            <tr v-for="issue in issues.issues" :key="`${issue.owner}/${issue.repo}/${issue.number}`">
+            <tr v-for="issue in issueSort.sorted.value" :key="`${issue.owner}/${issue.repo}/${issue.number}`">
               <td>{{ issue.owner }}/{{ issue.repo }}</td>
               <td><a :href="`https://github.com/${issue.owner}/${issue.repo}/issues/${issue.number}`" target="_blank">{{ issue.number }}</a></td>
               <td>{{ issue.title }}</td>
@@ -86,6 +102,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
 import { useDateRangeStore } from '@/stores/dateRange'
+import { useSortable } from '@/composables/useSortable'
 
 interface RepoItem { owner: string; name: string }
 
@@ -126,6 +143,13 @@ const filteredPrs = computed(() => {
     return true
   })
 })
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const prSort = useSortable<any>(filteredPrs, 'created_at', 'desc')
+
+const issuesList = computed(() => issues.value?.issues || [])
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const issueSort = useSortable<any>(issuesList, 'created_at', 'desc')
 
 const roleFilters = computed(() => {
   const all = prs.value?.prs || []

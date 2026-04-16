@@ -12,9 +12,16 @@
     <template v-else-if="data">
       <p>{{ data.issues?.length || 0 }} issues closed in window</p>
       <table v-if="data.issues?.length">
-        <thead><tr><th>#</th><th>Title</th><th>By</th><th>Closed</th><th>Closed By</th><th>Days Open</th></tr></thead>
+        <thead><tr>
+          <th class="sortable" @click="sort.toggleSort('number')">#{{ sort.sortIndicator('number') }}</th>
+          <th class="sortable" @click="sort.toggleSort('title')">Title{{ sort.sortIndicator('title') }}</th>
+          <th class="sortable" @click="sort.toggleSort('created_by')">By{{ sort.sortIndicator('created_by') }}</th>
+          <th class="sortable" @click="sort.toggleSort('closed_at')">Closed{{ sort.sortIndicator('closed_at') }}</th>
+          <th class="sortable" @click="sort.toggleSort('closed_by')">Closed By{{ sort.sortIndicator('closed_by') }}</th>
+          <th class="sortable" @click="sort.toggleSort('days_open')">Days Open{{ sort.sortIndicator('days_open') }}</th>
+        </tr></thead>
         <tbody>
-          <tr v-for="issue in data.issues" :key="issue.number">
+          <tr v-for="issue in sort.sorted.value" :key="issue.number">
             <td><a :href="`https://github.com/${owner}/${repo}/issues/${issue.number}`" target="_blank">{{ issue.number }}</a></td>
             <td>{{ issue.title }}</td>
             <td>{{ issue.created_by }}</td>
@@ -29,9 +36,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
 import { useDateRangeStore } from '@/stores/dateRange'
+import { useSortable } from '@/composables/useSortable'
 
 interface ClosedIssue {
   number: number; title: string; created_by: string
@@ -46,6 +54,9 @@ const dateRange = useDateRangeStore()
 const props = defineProps<{ owner: string; repo: string }>()
 const data = ref<ClosedIssuesData | null>(null)
 const loading = ref(true)
+
+const issueList = computed(() => data.value?.issues || [])
+const sort = useSortable(issueList, 'closed_at', 'desc')
 
 async function load() {
   loading.value = true

@@ -19,9 +19,15 @@
         <div v-for="(catKey, ci) in ['needs_response', 'op_responded', 'third_party_responded', 'stale']" :key="ci">
           <h4 style="margin-top: 0.75rem;">{{ formatCat(catKey) }} ({{ data.sections[sectionKey]?.[catKey]?.length || 0 }})</h4>
           <table v-if="data.sections[sectionKey]?.[catKey]?.length">
-            <thead><tr><th>#</th><th>Title</th><th>Created By</th><th>Created</th><th></th></tr></thead>
+            <thead><tr>
+              <th class="sortable" @click="toggleSort(sectionKey + '/' + catKey, 'number')">#{{ indicator(sectionKey + '/' + catKey, 'number') }}</th>
+              <th class="sortable" @click="toggleSort(sectionKey + '/' + catKey, 'title')">Title{{ indicator(sectionKey + '/' + catKey, 'title') }}</th>
+              <th class="sortable" @click="toggleSort(sectionKey + '/' + catKey, 'created_by')">Created By{{ indicator(sectionKey + '/' + catKey, 'created_by') }}</th>
+              <th class="sortable" @click="toggleSort(sectionKey + '/' + catKey, 'created_at')">Created{{ indicator(sectionKey + '/' + catKey, 'created_at') }}</th>
+              <th></th>
+            </tr></thead>
             <tbody>
-              <tr v-for="issue in data.sections[sectionKey][catKey]" :key="issue.number">
+              <tr v-for="issue in sortedSection(sectionKey + '/' + catKey, data.sections[sectionKey][catKey])" :key="issue.number">
                 <td><a :href="`https://github.com/${owner}/${repo}/issues/${issue.number}`" target="_blank">{{ issue.number }}</a></td>
                 <td>{{ issue.title }}</td>
                 <td>{{ issue.created_by }}</td>
@@ -38,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import axios from 'axios'
 import { useDateRangeStore } from '@/stores/dateRange'
 
@@ -59,6 +65,38 @@ const activeTab = ref<'bugs' | 'non_bugs'>('bugs')
 
 function formatCat(key: string): string {
   return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+const sectionSorts = reactive<Record<string, { key: string; dir: 'asc' | 'desc' }>>({})
+
+function toggleSort(label: string, key: string) {
+  const s = sectionSorts[label]
+  if (s && s.key === key) {
+    s.dir = s.dir === 'asc' ? 'desc' : 'asc'
+  } else {
+    sectionSorts[label] = { key, dir: 'asc' }
+  }
+}
+
+function indicator(label: string, key: string): string {
+  const s = sectionSorts[label]
+  if (!s || s.key !== key) return ''
+  return s.dir === 'asc' ? ' ▲' : ' ▼'
+}
+
+function sortedSection(label: string, items: RevisitIssue[]): RevisitIssue[] {
+  const s = sectionSorts[label]
+  if (!s) return items
+  const dir = s.dir === 'asc' ? 1 : -1
+  const k = s.key as keyof RevisitIssue
+  return [...items].sort((a, b) => {
+    const av = a[k], bv = b[k]
+    if (av == null && bv == null) return 0
+    if (av == null) return dir
+    if (bv == null) return -dir
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
+    return String(av).localeCompare(String(bv)) * dir
+  })
 }
 
 async function load() {

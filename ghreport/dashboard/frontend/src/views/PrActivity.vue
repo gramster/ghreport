@@ -13,9 +13,16 @@
       <div v-for="(section, label) in sections" :key="label">
         <h3>{{ label }} ({{ section.length }})</h3>
         <table v-if="section.length">
-          <thead><tr><th>#</th><th>Title</th><th>By</th><th>Created</th><th>Days</th><th>Lines</th></tr></thead>
+          <thead><tr>
+            <th class="sortable" @click="toggleSort(label, 'number')">#{{ indicator(label, 'number') }}</th>
+            <th class="sortable" @click="toggleSort(label, 'title')">Title{{ indicator(label, 'title') }}</th>
+            <th class="sortable" @click="toggleSort(label, 'created_by')">By{{ indicator(label, 'created_by') }}</th>
+            <th class="sortable" @click="toggleSort(label, 'created_at')">Created{{ indicator(label, 'created_at') }}</th>
+            <th class="sortable" @click="toggleSort(label, 'days_open')">Days{{ indicator(label, 'days_open') }}</th>
+            <th class="sortable" @click="toggleSort(label, 'lines_changed')">Lines{{ indicator(label, 'lines_changed') }}</th>
+          </tr></thead>
           <tbody>
-            <tr v-for="pr in section" :key="pr.number">
+            <tr v-for="pr in sortedSection(label, section)" :key="pr.number">
               <td><a :href="`https://github.com/${owner}/${repo}/pull/${pr.number}`" target="_blank">{{ pr.number }}</a></td>
               <td>{{ pr.title }}</td>
               <td>{{ pr.created_by }}</td>
@@ -32,7 +39,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
 import { useDateRangeStore } from '@/stores/dateRange'
 
@@ -60,6 +67,38 @@ const sections = computed<Record<string, PrItem[]>>(() => {
     'Stale Open': data.value.stale_open || [],
   }
 })
+
+const sectionSorts = reactive<Record<string, { key: string; dir: 'asc' | 'desc' }>>({})
+
+function toggleSort(label: string, key: string) {
+  const s = sectionSorts[label]
+  if (s && s.key === key) {
+    s.dir = s.dir === 'asc' ? 'desc' : 'asc'
+  } else {
+    sectionSorts[label] = { key, dir: 'asc' }
+  }
+}
+
+function indicator(label: string, key: string): string {
+  const s = sectionSorts[label]
+  if (!s || s.key !== key) return ''
+  return s.dir === 'asc' ? ' ▲' : ' ▼'
+}
+
+function sortedSection(label: string, items: PrItem[]): PrItem[] {
+  const s = sectionSorts[label]
+  if (!s) return items
+  const dir = s.dir === 'asc' ? 1 : -1
+  const k = s.key as keyof PrItem
+  return [...items].sort((a, b) => {
+    const av = a[k], bv = b[k]
+    if (av == null && bv == null) return 0
+    if (av == null) return dir
+    if (bv == null) return -dir
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
+    return String(av).localeCompare(String(bv)) * dir
+  })
+}
 
 async function load() {
   loading.value = true

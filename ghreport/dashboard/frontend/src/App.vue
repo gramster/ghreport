@@ -44,6 +44,8 @@ a { color: #0366d6; }
 table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
 th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #e1e4e8; }
 th { background: #f6f8fa; font-weight: 600; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { background: #ebedf0; }
 .card { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
 .card h3 { margin-bottom: 0.5rem; }
 .stat { font-size: 2rem; font-weight: 700; }
