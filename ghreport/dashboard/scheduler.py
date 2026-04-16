@@ -53,7 +53,7 @@ class SyncScheduler:
             # Check global rate-limit cooldown before each repo
             cooldown = get_rate_limit_until()
             if cooldown:
-                remaining = (cooldown - datetime.utcnow()).total_seconds()
+                remaining = (cooldown - datetime.now()).total_seconds()
                 if remaining > 0:
                     logger.warning(
                         "Skipping remaining repos — rate-limited for %.0fs",

@@ -48,22 +48,15 @@ async def _graphql_with_retry(gh, query, *, cursor=None, chunk=100, repo_key=Non
     """Call gh.graphql with exponential-backoff retry on transient errors."""
     global _rate_limit_until
 
-    # If we're in a global cooldown, wait it out or raise immediately
+    # If we're in a global cooldown, raise immediately so the scheduler
+    # can skip this repo (and all remaining repos) without waiting.
     cooldown = get_rate_limit_until()
     if cooldown:
         wait = (cooldown - datetime.now()).total_seconds()
         if wait > 0:
-            logger.info("Rate-limit cooldown: waiting %.0fs before next request", wait)
-            if repo_key:
-                _active_retries[repo_key] = {
-                    "attempt": 0,
-                    "max_attempts": _MAX_RETRIES,
-                    "delay": int(wait),
-                    "error": "Global rate-limit cooldown",
-                }
-            await asyncio.sleep(wait)
-            if repo_key and repo_key in _active_retries:
-                del _active_retries[repo_key]
+            raise GitHubRateLimitError(
+                f"Global rate-limit cooldown active ({int(wait)}s remaining)"
+            )
 
     last_exc: Exception | None = None
     for attempt in range(_MAX_RETRIES):
@@ -82,11 +75,12 @@ async def _graphql_with_retry(gh, query, *, cursor=None, chunk=100, repo_key=Non
             httpx.ReadError,
         ) as exc:
             last_exc = exc
+            is_rate_limit = _is_rate_limit_error(exc)
+
             if attempt == _MAX_RETRIES - 1:
                 if repo_key and repo_key in _active_retries:
                     del _active_retries[repo_key]
-                # Set global cooldown on rate-limit errors
-                if _is_rate_limit_error(exc):
+                if is_rate_limit:
                     _rate_limit_until = datetime.now() + timedelta(seconds=_RATE_LIMIT_COOLDOWN)
                     logger.warning(
                         "Rate limit detected, setting global cooldown until %s",
@@ -94,8 +88,23 @@ async def _graphql_with_retry(gh, query, *, cursor=None, chunk=100, repo_key=Non
                     )
                     raise GitHubRateLimitError(str(exc)) from exc
                 raise
+
+            # On FIRST rate-limit hit, set global cooldown and abort fast
+            # so we stop hammering the API across all repos
+            if is_rate_limit:
+                if repo_key and repo_key in _active_retries:
+                    del _active_retries[repo_key]
+                _rate_limit_until = datetime.now() + timedelta(seconds=_RATE_LIMIT_COOLDOWN)
+                logger.warning(
+                    "Rate limit on attempt %d/%d — setting global cooldown "
+                    "until %s and aborting",
+                    attempt + 1, _MAX_RETRIES,
+                    _rate_limit_until.isoformat(),
+                )
+                raise GitHubRateLimitError(str(exc)) from exc
+
+            # Non-rate-limit transient error: retry with backoff
             delay = _RETRY_BASE_DELAY * (2 ** attempt)
-            # Honour Retry-After if present (rate-limit / abuse detection)
             if hasattr(exc, 'retry_after') and exc.retry_after:
                 delay = max(delay, int(exc.retry_after))
             if repo_key:
