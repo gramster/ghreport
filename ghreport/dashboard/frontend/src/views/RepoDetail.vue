@@ -48,8 +48,8 @@
         <ChartCard :key="'time-to-close-'+syncVersion" title="Time to Close (days)" :owner="owner" :repo="repo" chart-type="time-to-close" />
         <ChartCard :key="'time-to-response-'+syncVersion" title="Time to Response (days)" :owner="owner" :repo="repo" chart-type="time-to-response" />
         <ChartCard :key="'label-frequency-'+syncVersion" title="Label Frequency" :owner="owner" :repo="repo" chart-type="label-frequency" />
-        <ChartCard :key="'files-changed-'+syncVersion" title="Files Changed/PR" :owner="owner" :repo="repo" chart-type="files-changed" />
-        <ChartCard :key="'lines-changed-'+syncVersion" title="Lines Changed/PR" :owner="owner" :repo="repo" chart-type="lines-changed" />
+        <ChartCard :key="'files-changed-'+syncVersion" title="Files Changed/PR" :owner="owner" :repo="repo" chart-type="files-changed" y-label="Files" />
+        <ChartCard :key="'lines-changed-'+syncVersion" title="Lines Changed/PR" :owner="owner" :repo="repo" chart-type="lines-changed" y-label="Lines" />
         <ChartCard :key="'top-terms-'+syncVersion" title="Top Terms" :owner="owner" :repo="repo" chart-type="top-terms" />
       </div>
     </template>

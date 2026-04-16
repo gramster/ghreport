@@ -14,6 +14,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
 const props = defineProps<{
   data: { months: Record<string, number[]> }
+  yLabel?: string
 }>()
 
 const chartConfig = computed(() => {
@@ -28,7 +29,7 @@ const chartConfig = computed(() => {
     labels: months,
     datasets: [
       {
-        label: 'Median (days)',
+        label: datasetLabel.value,
         data: medians,
         backgroundColor: 'rgba(54, 162, 235, 0.5)',
         borderColor: 'rgba(54, 162, 235, 1)',
@@ -38,15 +39,21 @@ const chartConfig = computed(() => {
   }
 })
 
-const options = {
+const yAxisLabel = computed(() => props.yLabel || 'Days')
+const datasetLabel = computed(() => {
+  const label = yAxisLabel.value
+  return label === 'Days' ? 'Median (days)' : `Median ${label.toLowerCase()}`
+})
+
+const options = computed(() => ({
   responsive: true,
   plugins: { legend: { display: false } },
   scales: {
     x: { ticks: { maxTicksLimit: 12 } },
     y: {
       beginAtZero: true,
-      title: { display: true, text: 'Days' },
+      title: { display: true, text: yAxisLabel.value },
     },
   },
-}
+}))
 </script>
