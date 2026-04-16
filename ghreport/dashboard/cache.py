@@ -67,6 +67,28 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
     sync_id = cursor.lastrowid
     await db.db.commit()
 
+    try:
+        return await _sync_repo_inner(db, owner, repo, token, repo_id, sync_id,
+                                       team=team, force=force,
+                                       backfill_since=backfill_since)
+    except Exception as exc:
+        # Mark sync as failed
+        completed_str = datetime.utcnow().isoformat()
+        error_msg = f"{type(exc).__name__}: {exc}"
+        await db.db.execute(
+            "UPDATE sync_log SET completed_at = ?, status = 'error', "
+            "error_message = ? WHERE id = ?",
+            (completed_str, error_msg, sync_id),
+        )
+        await db.db.commit()
+        raise
+
+
+async def _sync_repo_inner(db: Database, owner: str, repo: str, token: str,
+                            repo_id: int, sync_id: int, *,
+                            team: str | None = None, force: bool = False,
+                            backfill_since: datetime | None = None) -> dict:
+
     # Determine since date for incremental sync
     since = None
     if backfill_since:

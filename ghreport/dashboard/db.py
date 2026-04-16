@@ -89,7 +89,8 @@ CREATE TABLE IF NOT EXISTS sync_log (
     completed_at TEXT,
     status TEXT NOT NULL DEFAULT 'running',
     issues_fetched INTEGER DEFAULT 0,
-    prs_fetched INTEGER DEFAULT 0
+    prs_fetched INTEGER DEFAULT 0,
+    error_message TEXT
 );
 
 CREATE TABLE IF NOT EXISTS pr_reviewers (
@@ -146,6 +147,13 @@ class Database:
         if "data_since" not in cols:
             await self._db.execute(
                 "ALTER TABLE repos ADD COLUMN data_since TEXT"
+            )
+        # Add error_message to sync_log
+        cursor2 = await self._db.execute("PRAGMA table_info(sync_log)")
+        sync_cols = {row[1] for row in await cursor2.fetchall()}
+        if "error_message" not in sync_cols:
+            await self._db.execute(
+                "ALTER TABLE sync_log ADD COLUMN error_message TEXT"
             )
 
     async def _seed_defaults(self):

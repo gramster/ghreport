@@ -29,6 +29,9 @@ class SyncScheduler:
         self.settings = settings
         self.scheduler = AsyncIOScheduler()
         self._active_backfills: set[str] = set()
+        self._active_syncs: set[str] = set()
+        self._recent_errors: list[dict] = []  # last N sync errors
+        self._MAX_ERRORS = 20
 
     def start(self):
         self.scheduler.add_job(
@@ -48,6 +51,8 @@ class SyncScheduler:
         for r in repos:
             owner, name = r["owner"], r["name"]
             team = _team_for(self.settings, owner, name)
+            key = f"{owner}/{name}"
+            self._active_syncs.add(key)
             try:
                 result = await sync_repo(
                     self.db, owner, name,
@@ -58,12 +63,17 @@ class SyncScheduler:
                     owner, name,
                     result["issues_fetched"], result["prs_fetched"],
                 )
-            except Exception:
+            except Exception as exc:
                 logger.exception("Failed to sync %s/%s", owner, name)
+                self._record_error(owner, name, exc)
+            finally:
+                self._active_syncs.discard(key)
 
     async def sync_one(self, owner: str, repo: str):
         """Sync a single repo in the background."""
         team = _team_for(self.settings, owner, repo)
+        key = f"{owner}/{repo}"
+        self._active_syncs.add(key)
         try:
             result = await sync_repo(
                 self.db, owner, repo,
@@ -74,12 +84,17 @@ class SyncScheduler:
                 owner, repo,
                 result["issues_fetched"], result["prs_fetched"],
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed initial sync %s/%s", owner, repo)
+            self._record_error(owner, repo, exc)
+        finally:
+            self._active_syncs.discard(key)
 
     async def force_sync_one(self, owner: str, repo: str):
         """Force a full re-sync for a single repo (no incremental)."""
         team = _team_for(self.settings, owner, repo)
+        key = f"{owner}/{repo}"
+        self._active_syncs.add(key)
         try:
             result = await sync_repo(
                 self.db, owner, repo,
@@ -90,8 +105,11 @@ class SyncScheduler:
                 owner, repo,
                 result["issues_fetched"], result["prs_fetched"],
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed force re-sync %s/%s", owner, repo)
+            self._record_error(owner, repo, exc)
+        finally:
+            self._active_syncs.discard(key)
 
     async def backfill(self, owner: str, repo: str, since: datetime):
         """Fetch older data for a repo to cover a requested date range."""
@@ -99,6 +117,7 @@ class SyncScheduler:
         if key in self._active_backfills:
             return  # already running
         self._active_backfills.add(key)
+        self._active_syncs.add(key)
         team = _team_for(self.settings, owner, repo)
         try:
             result = await sync_repo(
@@ -111,13 +130,40 @@ class SyncScheduler:
                 owner, repo, since.isoformat(),
                 result["issues_fetched"], result["prs_fetched"],
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed backfill %s/%s", owner, repo)
+            self._record_error(owner, repo, exc)
         finally:
             self._active_backfills.discard(key)
+            self._active_syncs.discard(key)
 
     def is_backfilling(self, owner: str, repo: str) -> bool:
         return f"{owner}/{repo}" in self._active_backfills
+
+    def is_syncing(self, owner: str, repo: str) -> bool:
+        return f"{owner}/{repo}" in self._active_syncs
+
+    @property
+    def active_syncs(self) -> list[str]:
+        return sorted(self._active_syncs)
+
+    @property
+    def recent_errors(self) -> list[dict]:
+        return list(self._recent_errors)
+
+    def _record_error(self, owner: str, repo: str, exc: Exception):
+        from datetime import datetime as dt
+        self._recent_errors.append({
+            "repo": f"{owner}/{repo}",
+            "error": f"{type(exc).__name__}: {exc}",
+            "when": dt.utcnow().isoformat() + "Z",
+        })
+        # Keep only the most recent errors
+        if len(self._recent_errors) > self._MAX_ERRORS:
+            self._recent_errors = self._recent_errors[-self._MAX_ERRORS:]
+
+    def clear_errors(self):
+        self._recent_errors.clear()
 
     def stop(self):
         self.scheduler.shutdown(wait=False)

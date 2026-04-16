@@ -4,6 +4,7 @@
       <h2>{{ owner }}/{{ repo }}</h2>
       <div class="title-actions">
         <span v-if="repoInfo?.last_synced_at" class="sync-time">{{ new Date(repoInfo.last_synced_at).toLocaleString() }}</span>
+        <span v-if="syncError" class="sync-error" :title="syncError">⚠ Sync error</span>
         <button class="primary" @click="triggerSync" :disabled="syncing">
           {{ syncing ? 'Syncing...' : 'Sync Now' }}
         </button>
@@ -57,9 +58,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
 import { useDateRangeStore } from '@/stores/dateRange'
+import { useSyncActivityStore } from '@/stores/syncActivity'
 import ChartCard from '@/components/ChartCard.vue'
 
 interface DateRange {
@@ -76,10 +78,17 @@ interface RepoInfo {
 
 const props = defineProps<{ owner: string; repo: string }>()
 const dateRange = useDateRangeStore()
+const syncActivityStore = useSyncActivityStore()
 const repoInfo = ref<RepoInfo | null>(null)
 const loading = ref(true)
 const syncing = ref(false)
 const syncVersion = ref(0)
+
+const syncError = computed(() => {
+  const key = `${props.owner}/${props.repo}`
+  const err = syncActivityStore.errors.find(e => e.repo === key)
+  return err ? err.error : ''
+})
 
 function formatRange(range: DateRange): string {
   const fmt = (s: string) => s.slice(0, 10)
@@ -137,5 +146,10 @@ watch(() => [dateRange.since, dateRange.until, dateRange.coverageVersion], load)
 .sync-time {
   font-size: 0.8rem;
   color: #586069;
+}
+.sync-error {
+  font-size: 0.8rem;
+  color: #cb2431;
+  cursor: help;
 }
 </style>

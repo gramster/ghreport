@@ -6,10 +6,21 @@
       <div class="nav-dates">
         <label>Since <input type="date" v-model="dateRange.since" /></label>
         <label>Until <input type="date" v-model="dateRange.until" /></label>
-        <span v-if="dateRange.backfilling" class="backfill-indicator" title="Fetching older data...">⟳</span>
+        <span v-if="dateRange.backfilling" class="sync-indicator" title="Fetching older data...">⟳</span>
+        <span v-else-if="syncActivity.syncing.length" class="sync-indicator"
+              :title="'Syncing: ' + syncActivity.syncing.join(', ')">⟳</span>
       </div>
       <RepoSelector />
     </nav>
+    <div v-if="syncActivity.errors.length" class="error-banner">
+      <div class="error-banner-content">
+        <span class="error-icon">⚠</span>
+        <span>{{ syncActivity.errors.length }} sync error{{ syncActivity.errors.length > 1 ? 's' : '' }}:
+          <span class="error-detail">{{ latestError }}</span>
+        </span>
+        <button class="error-dismiss" @click="syncActivity.dismissErrors()" title="Dismiss">✕</button>
+      </div>
+    </div>
     <main class="content">
       <router-view />
     </main>
@@ -20,11 +31,24 @@
 import RepoSelector from '@/components/RepoSelector.vue'
 import { useReposStore } from '@/stores/repos'
 import { useDateRangeStore } from '@/stores/dateRange'
-import { onMounted } from 'vue'
+import { useSyncActivityStore } from '@/stores/syncActivity'
+import { onMounted, onUnmounted, computed } from 'vue'
 
 const reposStore = useReposStore()
 const dateRange = useDateRangeStore()
-onMounted(() => reposStore.fetchRepos())
+const syncActivity = useSyncActivityStore()
+
+const latestError = computed(() => {
+  if (!syncActivity.errors.length) return ''
+  const last = syncActivity.errors[syncActivity.errors.length - 1]
+  return `${last.repo}: ${last.error}`
+})
+
+onMounted(() => {
+  reposStore.fetchRepos()
+  syncActivity.startPolling()
+})
+onUnmounted(() => syncActivity.stopPolling())
 </script>
 
 <style>
@@ -37,8 +61,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .nav-dates { display: flex; gap: 0.75rem; align-items: center; margin-left: auto; }
 .nav-dates label { display: flex; align-items: center; gap: 0.3rem; color: #ffffffcc; font-size: 0.85rem; }
 .nav-dates input { padding: 0.25rem 0.4rem; border: 1px solid #586069; border-radius: 4px; background: #2f363d; color: #fff; font-size: 0.85rem; }
-.backfill-indicator { animation: spin 1s linear infinite; font-size: 1.1rem; color: #f9826c; }
+.sync-indicator { animation: spin 1s linear infinite; font-size: 1.1rem; color: #f9826c; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.error-banner { background: #ffeef0; border-bottom: 1px solid #fdaeb7; padding: 0.5rem 1.5rem; }
+.error-banner-content { display: flex; align-items: center; gap: 0.5rem; max-width: 1200px; margin: 0 auto; font-size: 0.9rem; color: #86181d; }
+.error-icon { font-size: 1.1rem; }
+.error-detail { color: #cb2431; font-family: monospace; font-size: 0.82rem; }
+.error-dismiss { background: none; border: none; color: #86181d; cursor: pointer; font-size: 1rem; margin-left: auto; padding: 0.2rem 0.4rem; }
+.error-dismiss:hover { color: #cb2431; }
 .content { max-width: 1200px; margin: 1.5rem auto; padding: 0 1rem; }
 a { color: #0366d6; }
 table { width: 100%; border-collapse: collapse; margin: 1rem 0; }

@@ -12,6 +12,24 @@ from ..cache import get_sync_status, parse_date_param, sync_repo
 router = APIRouter(tags=["sync"])
 
 
+@router.get("/api/sync/activity")
+async def get_sync_activity(request: Request):
+    """Return current sync activity and recent errors."""
+    scheduler = request.app.state.scheduler
+    return {
+        "syncing": sorted(scheduler.active_syncs),
+        "errors": scheduler.recent_errors,
+    }
+
+
+@router.delete("/api/sync/errors")
+async def clear_sync_errors(request: Request):
+    """Dismiss all recent sync errors."""
+    scheduler = request.app.state.scheduler
+    scheduler.clear_errors()
+    return {"status": "cleared"}
+
+
 @router.post("/api/repos/{owner}/{repo}/sync")
 async def trigger_repo_sync(request: Request, owner: str, repo: str):
     """Trigger manual sync for one repository."""
