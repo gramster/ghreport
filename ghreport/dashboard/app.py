@@ -6,7 +6,8 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import Settings, load_settings
@@ -68,8 +69,16 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # Mount Vue frontend static files (if built)
     frontend_dist = Path(__file__).parent / "frontend" / "dist"
     if frontend_dist.is_dir():
-        app.mount("/", StaticFiles(directory=str(frontend_dist), html=True),
-                  name="frontend")
+        index_html = frontend_dist / "index.html"
+
+        # Serve static assets (js, css, images) from dist
+        app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")),
+                  name="assets")
+
+        # SPA fallback: any non-API route serves index.html for Vue Router
+        @app.get("/{full_path:path}")
+        async def spa_fallback(request: Request, full_path: str):
+            return FileResponse(str(index_html))
 
     return app
 
