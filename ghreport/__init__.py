@@ -96,8 +96,8 @@ def training(repo, token, out, verbose, team, bug, feat, info):
 @cli.command()
 @click.option('-p', '--port', default=8000, type=int, help='Port to listen on.')
 @click.option('-H', '--host', default='0.0.0.0', type=str, help='Host to bind to.')
-@click.option('-c', '--config', type=click.Path(exists=True), default=None,
-              help='Path to TOML config file.')
+@click.option('-c', '--config', type=click.Path(), default=None,
+              help='Path to TOML config file (created if missing).')
 def dashboard(port, host, config):
     """Launch the interactive web dashboard."""
     try:

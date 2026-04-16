@@ -35,6 +35,38 @@ class Settings(BaseSettings):
     model_config = {"env_prefix": "GHREPORT_"}
 
 
+DEFAULT_CONFIG = """# ghreport dashboard configuration
+# Add repos via the web UI or uncomment and edit below:
+#
+# [[repos]]
+# owner = "microsoft"
+# name = "pyright"
+"""
+
+
+def _find_or_create_config(config_path: str | None) -> str | None:
+    """Locate a config file, creating a default one if none exists."""
+    if config_path:
+        p = Path(config_path)
+        if p.exists():
+            return config_path
+        # User specified a path that doesn't exist — create it
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(DEFAULT_CONFIG)
+        print(f"Created default config: {p}")
+        return config_path
+
+    # Auto-discover: look for config.toml in cwd
+    default = Path("config.toml")
+    if default.exists():
+        return str(default)
+
+    # First run — create it
+    default.write_text(DEFAULT_CONFIG)
+    print(f"Created default config: {default}")
+    return str(default)
+
+
 def load_settings(config_path: str | None = None) -> Settings:
     """Load settings from env vars and optional TOML config file."""
     overrides: dict = {}
@@ -45,8 +77,9 @@ def load_settings(config_path: str | None = None) -> Settings:
         if gh_token:
             overrides["github_token"] = gh_token
 
-    if config_path and Path(config_path).exists():
-        with open(config_path, "rb") as f:
+    resolved = _find_or_create_config(config_path)
+    if resolved and Path(resolved).exists():
+        with open(resolved, "rb") as f:
             data = tomllib.load(f)
         if "repos" in data:
             overrides["repos"] = [RepoConfig(**r) for r in data["repos"]]

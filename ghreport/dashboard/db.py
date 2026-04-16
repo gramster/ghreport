@@ -109,6 +109,7 @@ class Database:
         self._db: aiosqlite.Connection | None = None
 
     async def connect(self):
+        is_new = not os.path.exists(self.db_path)
         os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
         self._db = await aiosqlite.connect(self.db_path)
         self._db.row_factory = aiosqlite.Row
@@ -117,6 +118,9 @@ class Database:
         await self._db.executescript(SCHEMA)
         # Migrations — add columns if missing
         await self._migrate()
+        # Seed default common team members on first run
+        if is_new:
+            await self._seed_defaults()
         await self._db.commit()
 
     async def _migrate(self):
@@ -126,6 +130,15 @@ class Database:
         if "data_since" not in cols:
             await self._db.execute(
                 "ALTER TABLE repos ADD COLUMN data_since TEXT"
+            )
+
+    async def _seed_defaults(self):
+        """Seed default common team members on first database creation."""
+        defaults = ["dependabot", "app/copilot-swe-agent"]
+        for login in defaults:
+            await self._db.execute(
+                "INSERT OR IGNORE INTO common_team_members (login) VALUES (?)",
+                (login,),
             )
 
     async def close(self):
