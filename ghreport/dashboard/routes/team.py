@@ -39,7 +39,7 @@ async def add_common_member(request: Request, body: MemberRequest):
     return {"login": body.login}
 
 
-@router.delete("/common/{login}")
+@router.delete("/common/{login:path}")
 async def remove_common_member(request: Request, login: str):
     """Remove a common team member."""
     db = request.app.state.db
@@ -97,7 +97,7 @@ async def add_repo_member(request: Request, owner: str, repo: str, body: MemberR
     return {"login": body.login}
 
 
-@router.delete("/repos/{owner}/{repo}/{login}")
+@router.delete("/repos/{owner}/{repo}/{login:path}")
 async def remove_repo_member(request: Request, owner: str, repo: str, login: str):
     """Remove a supplemental team member from a repo."""
     db = request.app.state.db
