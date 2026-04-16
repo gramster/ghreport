@@ -78,23 +78,33 @@ def parse_raw_pull_request(pull_request: dict) -> PullRequest | None:
                         seen.add(login)
                         reviewers.append(login)
 
-        # Extract commit authors != PR author (collaborators)
+        # Collaborators = all commit authors/co-authors, excluding PR author
+        seen_collab: set[str] = set()
         collaborators: list[str] = []
         if 'commits' in pull_request:
-            seen_collab: set[str] = set()
             for node in pull_request['commits'].get('nodes', []):
                 commit = node.get('commit', {}) if node else {}
-                author = commit.get('author', {}) or {}
-                user = author.get('user') or {}
-                login = user.get('login', '')
-                # For bots/apps, user is null — derive login from name
-                if not login:
-                    name = author.get('name', '')
-                    if name and name.endswith('[bot]'):
-                        login = f"app/{name[:-5]}"
-                if login and login != created_by and login not in seen_collab:
-                    seen_collab.add(login)
-                    collaborators.append(login)
+                # Use authors (plural) which includes co-authors from trailers
+                authors_data = commit.get('authors', {}) or {}
+                author_nodes = authors_data.get('nodes', [])
+                # Fallback to singular author for old cached data
+                if not author_nodes:
+                    single = commit.get('author')
+                    if single:
+                        author_nodes = [single]
+                for author in author_nodes:
+                    if not author:
+                        continue
+                    user = author.get('user') or {}
+                    login = user.get('login', '')
+                    # For bots/apps, user is null — derive login from name
+                    if not login:
+                        name = author.get('name', '')
+                        if name and name.endswith('[bot]'):
+                            login = f"app/{name[:-5]}"
+                    if login and login != created_by and login not in seen_collab:
+                        seen_collab.add(login)
+                        collaborators.append(login)
     except Exception as e:
         print(f'Failed to parse pull_request\n{pull_request}: {e}')
         return None

@@ -245,10 +245,12 @@ query ($cursor: String, $chunk: Int) {{
           commits(first: 100) {{
             nodes {{
               commit {{
-                author {{
-                  name
-                  user {{
-                    login
+                authors(first: 10) {{
+                  nodes {{
+                    name
+                    user {{
+                      login
+                    }}
                   }}
                 }}
               }}
@@ -306,10 +308,12 @@ query ($cursor: String, $chunk: Int) {{
           commits(first: 100) {{
             nodes {{
               commit {{
-                author {{
-                  name
-                  user {{
-                    login
+                authors(first: 10) {{
+                  nodes {{
+                    name
+                    user {{
+                      login
+                    }}
                   }}
                 }}
               }}

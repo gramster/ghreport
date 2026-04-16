@@ -55,12 +55,14 @@ async def lifespan(app: FastAPI):
 async def _maybe_resync_for_roles(db: Database, scheduler: SyncScheduler):
     """Trigger a full re-sync if reviewer/collaborator data is missing.
 
-    Detects PRs whose raw_json doesn't contain 'reviews' — meaning they
-    were fetched before the GraphQL queries were updated to include
-    review/commit data.
+    Detects PRs whose raw_json doesn't contain 'authors' (plural) —
+    meaning they were fetched before the GraphQL queries were updated
+    to include review/commit co-author data.
     """
     stale = (await (await db.db.execute(
-        "SELECT COUNT(*) FROM pull_requests WHERE raw_json NOT LIKE '%\"reviews\"%'"
+        "SELECT COUNT(*) FROM pull_requests"
+        " WHERE raw_json NOT LIKE '%\"reviews\"%'"
+        "    OR raw_json NOT LIKE '%\"authors\"%'"
     )).fetchone())[0]
     if stale == 0:
         return
