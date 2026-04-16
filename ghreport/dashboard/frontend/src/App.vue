@@ -2,6 +2,7 @@
   <div id="app">
     <nav class="navbar">
       <router-link to="/" class="brand">ghreport</router-link>
+      <router-link to="/repos" class="nav-link">Repos</router-link>
       <router-link to="/team" class="nav-link">Team</router-link>
       <div class="nav-dates">
         <label>Since <input type="date" v-model="dateRange.since" /></label>
