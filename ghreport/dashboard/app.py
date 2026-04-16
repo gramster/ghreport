@@ -55,31 +55,28 @@ async def lifespan(app: FastAPI):
 async def _maybe_resync_for_roles(db: Database, scheduler: SyncScheduler):
     """Trigger a full re-sync if reviewer/collaborator data is missing.
 
-    This handles the case where the GraphQL queries were updated to fetch
-    review/commit data but existing cached PRs don't have that info yet.
+    Detects PRs whose raw_json doesn't contain 'reviews' — meaning they
+    were fetched before the GraphQL queries were updated to include
+    review/commit data.
     """
-    pr_count = (await (await db.db.execute(
-        "SELECT COUNT(*) FROM pull_requests"
+    stale = (await (await db.db.execute(
+        "SELECT COUNT(*) FROM pull_requests WHERE raw_json NOT LIKE '%\"reviews\"%'"
     )).fetchone())[0]
-    if pr_count == 0:
+    if stale == 0:
         return
 
-    rev_count = (await (await db.db.execute(
-        "SELECT COUNT(*) FROM pr_reviewers"
-    )).fetchone())[0]
-    collab_count = (await (await db.db.execute(
-        "SELECT COUNT(*) FROM pr_collaborators"
+    total = (await (await db.db.execute(
+        "SELECT COUNT(*) FROM pull_requests"
     )).fetchone())[0]
 
-    if rev_count == 0 and collab_count == 0:
-        logger.info(
-            "Detected %d PRs but no reviewer/collaborator data — "
-            "scheduling full re-sync to populate role data", pr_count,
-        )
-        repos_list = await db.get_all_repos()
-        import asyncio
-        for r in repos_list:
-            asyncio.create_task(scheduler.force_sync_one(r["owner"], r["name"]))
+    logger.info(
+        "Detected %d/%d PRs with stale data (missing reviews field) — "
+        "scheduling full re-sync to populate role data", stale, total,
+    )
+    repos_list = await db.get_all_repos()
+    import asyncio
+    for r in repos_list:
+        asyncio.create_task(scheduler.force_sync_one(r["owner"], r["name"]))
 
 
 def create_app(config_path: str | None = None) -> FastAPI:

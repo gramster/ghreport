@@ -18,10 +18,12 @@ from ...core.analyzer import (
     top_terms_data,
 )
 from ..cache import (
+    enrich_team_response,
     filter_active_issues,
     filter_active_prs,
     get_cached_issues,
     get_cached_prs,
+    get_cached_team_members,
     parse_date_param,
 )
 
@@ -118,6 +120,11 @@ async def chart_time_to_response(
     open_issues = filter_active_issues(open_issues, since_dt, until_dt)
     closed_issues = filter_active_issues(closed_issues, since_dt, until_dt)
     resp_since = since_dt or (datetime.now(tz=timezone.utc) - timedelta(days=months * 30))
+
+    # Re-compute first_team_response_at from events + current team members
+    members = await get_cached_team_members(db, repo_id)
+    enrich_team_response(open_issues, members)
+    enrich_team_response(closed_issues, members)
 
     return time_to_first_response_data(open_issues, closed_issues, since=resp_since)
 

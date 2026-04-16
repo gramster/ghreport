@@ -21,6 +21,7 @@ from ...core.analyzer import (
     top_terms_data,
 )
 from ..cache import (
+    enrich_team_response,
     filter_active_issues,
     filter_active_prs,
     get_cached_issues,
@@ -33,7 +34,8 @@ router = APIRouter(prefix="/api/aggregate", tags=["aggregate"])
 
 
 async def _collect_all_issues(request: Request, state: str | None = None,
-                              since_dt=None, until_dt=None):
+                              since_dt=None, until_dt=None,
+                              enrich_response: bool = False):
     """Collect issues across all repos, optionally filtered by date."""
     db = request.app.state.db
     repos = await db.get_all_repos()
@@ -41,6 +43,9 @@ async def _collect_all_issues(request: Request, state: str | None = None,
     for r in repos:
         issues = await get_cached_issues(db, r["id"], state=state)
         issues = filter_active_issues(issues, since_dt, until_dt)
+        if enrich_response:
+            members = await get_cached_team_members(db, r["id"])
+            enrich_team_response(issues, members)
         all_issues.extend(issues)
     return all_issues
 
@@ -132,8 +137,10 @@ async def aggregate_chart(
         issues = await _collect_all_issues(request, state="closed", since_dt=since_dt, until_dt=until_dt)
         return time_to_close_issues_data(issues)
     elif chart_type == "time-to-response":
-        open_issues = await _collect_all_issues(request, state="open", since_dt=since_dt, until_dt=until_dt)
-        closed_issues = await _collect_all_issues(request, state="closed", since_dt=since_dt, until_dt=until_dt)
+        open_issues = await _collect_all_issues(request, state="open", since_dt=since_dt, until_dt=until_dt,
+                                                enrich_response=True)
+        closed_issues = await _collect_all_issues(request, state="closed", since_dt=since_dt, until_dt=until_dt,
+                                                  enrich_response=True)
         resp_since = since_dt or (datetime.now(tz=timezone.utc) - timedelta(days=months * 30))
         return time_to_first_response_data(open_issues, closed_issues, since=resp_since)
     elif chart_type == "label-frequency":
@@ -182,6 +189,7 @@ async def aggregate_report(
             issues = await get_cached_issues(db, r["id"], state="open")
             issues = filter_active_issues(issues, since_dt, until_dt)
             members = await get_cached_team_members(db, r["id"])
+            enrich_team_response(issues, members)
             result = revisits_data(now, r["owner"], r["name"], issues, members,
                                    bug_label=bug_label, days=days, stale=stale,
                                    show_all=show_all)

@@ -448,6 +448,24 @@ def filter_active_issues(
     return result
 
 
+def enrich_team_response(issues: list[Issue], members: set[str]) -> list[Issue]:
+    """Re-compute first_team_response_at using the given team members set.
+
+    This allows dynamic team member changes to be reflected immediately
+    in time-to-response charts without needing a full re-sync.
+    """
+    for issue in issues:
+        if issue.created_by in members:
+            issue.first_team_response_at = issue.created_at
+        else:
+            issue.first_team_response_at = None
+            for evt in issue.events:
+                if evt.event == 'comment' and evt.actor in members:
+                    issue.first_team_response_at = evt.when
+                    break
+    return issues
+
+
 def filter_active_prs(
     prs: list[PullRequest],
     since: datetime | None = None,

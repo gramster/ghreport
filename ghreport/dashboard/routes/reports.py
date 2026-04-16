@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from ...core.analyzer import closed_issues_data, pr_activity_data, revisits_data
 from ..cache import (
+    enrich_team_response,
     filter_active_issues,
     filter_active_prs,
     get_cached_issues,
@@ -58,6 +59,7 @@ async def report_revisits(
     issues = await get_cached_issues(db, repo_id, state="open")
     issues = filter_active_issues(issues, since_dt, until_dt)
     members = await get_cached_team_members(db, repo_id)
+    enrich_team_response(issues, members)
     now = until_dt or datetime.now(tz=timezone.utc)
     if since_dt:
         days = max(1, (now - since_dt).days)
