@@ -79,7 +79,7 @@ async def _maybe_resync_for_roles(db: Database, scheduler: SyncScheduler):
     async def _resync_all():
         for r in repos_list:
             await scheduler.force_sync_one(r["owner"], r["name"])
-            await asyncio.sleep(2)  # avoid rate-limiting between repos
+            await asyncio.sleep(5)  # avoid rate-limiting between repos
 
     asyncio.create_task(_resync_all())
 

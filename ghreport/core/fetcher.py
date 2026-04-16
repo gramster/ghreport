@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Retry settings for transient GitHub errors (rate limits, HTML responses)
 _MAX_RETRIES = 5
-_RETRY_BASE_DELAY = 5  # seconds
+_RETRY_BASE_DELAY = 10  # seconds
 
 
 async def _graphql_with_retry(gh, query, *, cursor=None, chunk=100):
@@ -22,6 +22,7 @@ async def _graphql_with_retry(gh, query, *, cursor=None, chunk=100):
             return await gh.graphql(query, cursor=cursor, chunk=chunk)
         except (
             gidgethub.GraphQLResponseTypeError,
+            gidgethub.RateLimitExceeded,
             httpx.HTTPStatusError,
             httpx.RemoteProtocolError,
             httpx.ReadError,
@@ -29,6 +30,9 @@ async def _graphql_with_retry(gh, query, *, cursor=None, chunk=100):
             if attempt == _MAX_RETRIES - 1:
                 raise
             delay = _RETRY_BASE_DELAY * (2 ** attempt)
+            # Honour Retry-After if present (rate-limit / abuse detection)
+            if hasattr(exc, 'retry_after') and exc.retry_after:
+                delay = max(delay, int(exc.retry_after))
             logger.warning(
                 "GitHub API error (attempt %d/%d), retrying in %ds: %s",
                 attempt + 1, _MAX_RETRIES, delay, exc,
@@ -320,7 +324,7 @@ query ($cursor: String, $chunk: Int) {{
 
 
 async def get_raw_pull_requests(owner: str, repo: str, token: str, state: str = 'open',
-                                chunk: int = 100, since: datetime | None = None,
+                                chunk: int = 50, since: datetime | None = None,
                                 use_updated: bool = False,
                                 verbose: bool = False, debug_log_list: list[str] | None = None) -> list[dict]:
     cursor = None
