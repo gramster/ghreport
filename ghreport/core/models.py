@@ -39,3 +39,5 @@ class PullRequest:
     lines_changed: int
     files_changed: int
     files: list[str]
+    reviewers: list[str] | None = None
+    collaborators: list[str] | None = None

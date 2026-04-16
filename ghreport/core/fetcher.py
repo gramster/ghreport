@@ -225,7 +225,25 @@ query ($cursor: String, $chunk: Int) {{
               deletions
               changeType
             }}
-          }}              
+          }}
+          reviews(first: 50) {{
+            nodes {{
+              author {{
+                login
+              }}
+            }}
+          }}
+          commits(first: 100) {{
+            nodes {{
+              commit {{
+                author {{
+                  user {{
+                    login
+                  }}
+                }}
+              }}
+            }}
+          }}
         }}
       }}
     }}
@@ -267,7 +285,25 @@ query ($cursor: String, $chunk: Int) {{
               deletions
               changeType
             }}
-          }}                          
+          }}
+          reviews(first: 50) {{
+            nodes {{
+              author {{
+                login
+              }}
+            }}
+          }}
+          commits(first: 100) {{
+            nodes {{
+              commit {{
+                author {{
+                  user {{
+                    login
+                  }}
+                }}
+              }}
+            }}
+          }}
         }}
       }}
     }}

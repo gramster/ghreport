@@ -51,6 +51,8 @@ async def list_prs(
                 "closed_at": p.closed_at.isoformat() if p.closed_at else None,
                 "lines_changed": p.lines_changed,
                 "files_changed": p.files_changed,
+                "reviewers": p.reviewers or [],
+                "collaborators": p.collaborators or [],
             }
             for p in page_prs
         ],

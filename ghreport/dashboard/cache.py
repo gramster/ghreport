@@ -217,6 +217,8 @@ async def _upsert_pr(db: Database, repo_id: int, pr: PullRequest, raw: dict, sta
               _dt_str(pr.created_at), _dt_str(pr.merged_at), _dt_str(pr.closed_at),
               pr.lines_changed, pr.files_changed, state, json.dumps(raw), pr_db_id))
         await db.db.execute("DELETE FROM pr_files WHERE pr_id = ?", (pr_db_id,))
+        await db.db.execute("DELETE FROM pr_reviewers WHERE pr_id = ?", (pr_db_id,))
+        await db.db.execute("DELETE FROM pr_collaborators WHERE pr_id = ?", (pr_db_id,))
     else:
         cursor = await db.db.execute("""
             INSERT INTO pull_requests (repo_id, number, title, created_by, closed_by,
@@ -230,6 +232,16 @@ async def _upsert_pr(db: Database, repo_id: int, pr: PullRequest, raw: dict, sta
     for path in pr.files:
         await db.db.execute(
             "INSERT INTO pr_files (pr_id, path) VALUES (?, ?)", (pr_db_id, path)
+        )
+
+    for login in (pr.reviewers or []):
+        await db.db.execute(
+            "INSERT INTO pr_reviewers (pr_id, login) VALUES (?, ?)", (pr_db_id, login)
+        )
+
+    for login in (pr.collaborators or []):
+        await db.db.execute(
+            "INSERT INTO pr_collaborators (pr_id, login) VALUES (?, ?)", (pr_db_id, login)
         )
 
 
@@ -305,6 +317,20 @@ async def get_cached_prs(db: Database, repo_id: int,
         file_rows = await file_cursor.fetchall()
         files = [f["path"] for f in file_rows]
 
+        # Load reviewers
+        rev_cursor = await db.db.execute(
+            "SELECT login FROM pr_reviewers WHERE pr_id = ?", (row_dict["id"],)
+        )
+        rev_rows = await rev_cursor.fetchall()
+        reviewers = [r["login"] for r in rev_rows]
+
+        # Load collaborators
+        collab_cursor = await db.db.execute(
+            "SELECT login FROM pr_collaborators WHERE pr_id = ?", (row_dict["id"],)
+        )
+        collab_rows = await collab_cursor.fetchall()
+        collaborators = [r["login"] for r in collab_rows]
+
         prs.append(PullRequest(
             number=row_dict["number"],
             title=row_dict["title"],
@@ -316,6 +342,8 @@ async def get_cached_prs(db: Database, repo_id: int,
             lines_changed=row_dict["lines_changed"] or 0,
             files_changed=row_dict["files_changed"] or 0,
             files=files,
+            reviewers=reviewers,
+            collaborators=collaborators,
         ))
     return prs
 

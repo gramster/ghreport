@@ -69,8 +69,9 @@ async def member_prs(
     since: str | None = Query(None, description="ISO date, e.g. 2025-01-01"),
     until: str | None = Query(None, description="ISO date, e.g. 2025-12-31"),
     state: str | None = Query(None),
+    role: str | None = Query(None, description="Filter by role: opened, reviewed, collaborated"),
 ):
-    """PRs created by the member."""
+    """PRs where the member is author, reviewer, or collaborator."""
     db = request.app.state.db
     repos = await _get_repos(db, owner, repo)
 
@@ -81,8 +82,21 @@ async def member_prs(
     for r in repos:
         prs = await get_cached_prs(db, r["id"], state=state)
         for pr in prs:
-            if pr.created_by != login:
+            is_author = pr.created_by == login
+            is_reviewer = login in (pr.reviewers or [])
+            is_collaborator = login in (pr.collaborators or [])
+
+            if not is_author and not is_reviewer and not is_collaborator:
                 continue
+
+            # Apply role filter
+            if role == "opened" and not is_author:
+                continue
+            if role == "reviewed" and not is_reviewer:
+                continue
+            if role == "collaborated" and not is_collaborator:
+                continue
+
             if since_dt and pr.created_at < since_dt:
                 continue
             if until_dt and pr.created_at > until_dt:
@@ -109,6 +123,9 @@ async def member_prs(
                 "days_open": days_open,
                 "lines_changed": pr.lines_changed,
                 "files_changed": pr.files_changed,
+                "is_author": is_author,
+                "is_reviewer": is_reviewer,
+                "is_collaborator": is_collaborator,
             })
 
     results.sort(key=lambda x: x["created_at"] or "", reverse=True)
@@ -133,6 +150,8 @@ async def member_summary(
     issues_commented = 0
     prs_created = 0
     prs_merged = 0
+    prs_reviewed = 0
+    prs_collaborated = 0
     total_lines = 0
 
     for r in repos:
@@ -149,16 +168,19 @@ async def member_summary(
 
         prs = await get_cached_prs(db, r["id"])
         for pr in prs:
-            if pr.created_by != login:
-                continue
             if since_dt and pr.created_at < since_dt:
                 continue
             if until_dt and pr.created_at > until_dt:
                 continue
-            prs_created += 1
-            if pr.merged_at:
-                prs_merged += 1
-            total_lines += pr.lines_changed
+            if pr.created_by == login:
+                prs_created += 1
+                if pr.merged_at:
+                    prs_merged += 1
+                total_lines += pr.lines_changed
+            if login in (pr.reviewers or []):
+                prs_reviewed += 1
+            if login in (pr.collaborators or []):
+                prs_collaborated += 1
 
     return {
         "login": login,
@@ -166,6 +188,8 @@ async def member_summary(
         "issues_commented": issues_commented,
         "prs_created": prs_created,
         "prs_merged": prs_merged,
+        "prs_reviewed": prs_reviewed,
+        "prs_collaborated": prs_collaborated,
         "total_lines_changed": total_lines,
     }
 

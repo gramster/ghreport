@@ -66,12 +66,37 @@ def parse_raw_pull_request(pull_request: dict) -> PullRequest | None:
         deletions: int = pull_request['deletions']
         changed_files: int = pull_request['changedFiles']
         files: list[str] = [f['path'] for f in pull_request['files']['nodes']]
+
+        # Extract unique reviewers (excluding PR author)
+        reviewers: list[str] = []
+        if 'reviews' in pull_request:
+            seen: set[str] = set()
+            for node in pull_request['reviews'].get('nodes', []):
+                if node and node.get('author'):
+                    login = node['author'].get('login', '')
+                    if login and login != created_by and login not in seen:
+                        seen.add(login)
+                        reviewers.append(login)
+
+        # Extract commit authors != PR author (collaborators)
+        collaborators: list[str] = []
+        if 'commits' in pull_request:
+            seen_collab: set[str] = set()
+            for node in pull_request['commits'].get('nodes', []):
+                commit = node.get('commit', {}) if node else {}
+                author = commit.get('author', {}) or {}
+                user = author.get('user') or {}
+                login = user.get('login', '')
+                if login and login != created_by and login not in seen_collab:
+                    seen_collab.add(login)
+                    collaborators.append(login)
     except Exception as e:
         print(f'Failed to parse pull_request\n{pull_request}: {e}')
         return None
 
     return PullRequest(number, title, created_at, created_by, merged_at, closed_at, closed_by,
-                       additions + deletions, changed_files, files)
+                       additions + deletions, changed_files, files,
+                       reviewers=reviewers, collaborators=collaborators)
 
 
 def get_active_labels(events: list[Event], at: datetime | None = None) -> set[str]:

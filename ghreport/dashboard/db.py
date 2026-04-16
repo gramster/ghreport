@@ -92,12 +92,28 @@ CREATE TABLE IF NOT EXISTS sync_log (
     prs_fetched INTEGER DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS pr_reviewers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pr_id INTEGER NOT NULL REFERENCES pull_requests(id) ON DELETE CASCADE,
+    login TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pr_collaborators (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pr_id INTEGER NOT NULL REFERENCES pull_requests(id) ON DELETE CASCADE,
+    login TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_issues_repo_state ON issues(repo_id, state);
 CREATE INDEX IF NOT EXISTS idx_issues_repo_number ON issues(repo_id, number);
 CREATE INDEX IF NOT EXISTS idx_prs_repo_state ON pull_requests(repo_id, state);
 CREATE INDEX IF NOT EXISTS idx_prs_repo_number ON pull_requests(repo_id, number);
 CREATE INDEX IF NOT EXISTS idx_events_issue ON events(issue_id);
 CREATE INDEX IF NOT EXISTS idx_pr_files_pr ON pr_files(pr_id);
+CREATE INDEX IF NOT EXISTS idx_pr_reviewers_pr ON pr_reviewers(pr_id);
+CREATE INDEX IF NOT EXISTS idx_pr_reviewers_login ON pr_reviewers(login);
+CREATE INDEX IF NOT EXISTS idx_pr_collaborators_pr ON pr_collaborators(pr_id);
+CREATE INDEX IF NOT EXISTS idx_pr_collaborators_login ON pr_collaborators(login);
 CREATE INDEX IF NOT EXISTS idx_team_members_repo ON team_members(repo_id);
 CREATE INDEX IF NOT EXISTS idx_sync_log_repo ON sync_log(repo_id);
 """

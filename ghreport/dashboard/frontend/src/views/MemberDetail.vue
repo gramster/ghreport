@@ -18,8 +18,10 @@
       <div v-if="summary" class="grid" style="margin-bottom: 1.5rem;">
         <div class="card"><div class="stat">{{ summary.issues_created }}</div><div class="stat-label">Issues Created</div></div>
         <div class="card"><div class="stat">{{ summary.issues_commented }}</div><div class="stat-label">Issues Commented</div></div>
-        <div class="card"><div class="stat">{{ summary.prs_created }}</div><div class="stat-label">PRs Created</div></div>
+        <div class="card"><div class="stat">{{ summary.prs_created }}</div><div class="stat-label">PRs Opened</div></div>
         <div class="card"><div class="stat">{{ summary.prs_merged }}</div><div class="stat-label">PRs Merged</div></div>
+        <div class="card"><div class="stat">{{ summary.prs_reviewed }}</div><div class="stat-label">PRs Reviewed</div></div>
+        <div class="card"><div class="stat">{{ summary.prs_collaborated }}</div><div class="stat-label">PRs Collaborated</div></div>
         <div class="card"><div class="stat">{{ summary.total_lines_changed }}</div><div class="stat-label">Lines Changed</div></div>
       </div>
 
@@ -29,13 +31,24 @@
       </div>
 
       <div v-if="activeTab === 'prs' && prs">
-        <table v-if="prs.prs.length">
-          <thead><tr><th>Repo</th><th>#</th><th>Title</th><th>State</th><th>Created</th><th>Days</th><th>Lines</th></tr></thead>
+        <div class="role-filter" style="margin-bottom: 0.75rem;">
+          <button v-for="rf in roleFilters" :key="rf.value"
+            :class="{ active: prRole === rf.value }" @click="prRole = rf.value">
+            {{ rf.label }} ({{ rf.count }})
+          </button>
+        </div>
+        <table v-if="filteredPrs.length">
+          <thead><tr><th>Repo</th><th>#</th><th>Title</th><th>Role</th><th>State</th><th>Created</th><th>Days</th><th>Lines</th></tr></thead>
           <tbody>
-            <tr v-for="pr in prs.prs" :key="`${pr.owner}/${pr.repo}/${pr.number}`">
+            <tr v-for="pr in filteredPrs" :key="`${pr.owner}/${pr.repo}/${pr.number}`">
               <td>{{ pr.owner }}/{{ pr.repo }}</td>
               <td><a :href="`https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`" target="_blank">{{ pr.number }}</a></td>
               <td>{{ pr.title }}</td>
+              <td>
+                <span v-if="pr.is_author" class="role-tag author">Author</span>
+                <span v-if="pr.is_reviewer" class="role-tag reviewer">Reviewer</span>
+                <span v-if="pr.is_collaborator" class="role-tag collaborator">Collaborator</span>
+              </td>
               <td><span :class="'badge ' + pr.state">{{ pr.state }}</span></td>
               <td>{{ pr.created_at }}</td>
               <td>{{ pr.days_open }}</td>
@@ -70,7 +83,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
 import { useDateRangeStore } from '@/stores/dateRange'
 
@@ -82,6 +95,7 @@ const dateRange = useDateRangeStore()
 const repos = ref<RepoItem[]>([])
 const selectedRepo = ref('')
 const activeTab = ref<'prs' | 'issues'>('prs')
+const prRole = ref('')
 const loading = ref(true)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const summary = ref<any>(null)
@@ -100,6 +114,31 @@ function buildParams() {
   }
   return p
 }
+
+const filteredPrs = computed(() => {
+  if (!prs.value?.prs) return []
+  if (!prRole.value) return prs.value.prs
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return prs.value.prs.filter((pr: any) => {
+    if (prRole.value === 'opened') return pr.is_author
+    if (prRole.value === 'reviewed') return pr.is_reviewer
+    if (prRole.value === 'collaborated') return pr.is_collaborator
+    return true
+  })
+})
+
+const roleFilters = computed(() => {
+  const all = prs.value?.prs || []
+  return [
+    { label: 'All', value: '', count: all.length },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    { label: 'Opened', value: 'opened', count: all.filter((p: any) => p.is_author).length },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    { label: 'Reviewed', value: 'reviewed', count: all.filter((p: any) => p.is_reviewer).length },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    { label: 'Collaborated', value: 'collaborated', count: all.filter((p: any) => p.is_collaborator).length },
+  ]
+})
 
 async function load() {
   loading.value = true
@@ -165,6 +204,26 @@ watch([selectedRepo, () => dateRange.since, () => dateRange.until, () => dateRan
   border-radius: 3px;
   background: #e1e4e8;
   margin-right: 0.25rem;
+}
+.role-tag.author { background: #0366d6; color: #fff; }
+.role-tag.reviewer { background: #28a745; color: #fff; }
+.role-tag.collaborator { background: #6f42c1; color: #fff; }
+.role-filter {
+  display: flex;
+  gap: 0.35rem;
+}
+.role-filter button {
+  padding: 0.3rem 0.75rem;
+  border: 1px solid #e1e4e8;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.role-filter button.active {
+  background: #0366d6;
+  color: #fff;
+  border-color: #0366d6;
 }
 .badge { font-size: 0.8rem; padding: 0.1rem 0.5rem; border-radius: 10px; }
 .badge.open { background: #28a745; color: #fff; }
