@@ -93,15 +93,18 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
     # Include common team members so response-time calculations are accurate
     common_cursor = await db.db.execute("SELECT login FROM common_team_members")
     common_rows = await common_cursor.fetchall()
-    members.update(r["login"] for r in common_rows)
+    common_logins = {r["login"] for r in common_rows}
 
-    # Store team members
+    # Store team members (without common members — those are separate)
     await db.db.execute("DELETE FROM team_members WHERE repo_id = ?", (repo_id,))
     for login in members:
         await db.db.execute(
             "INSERT OR IGNORE INTO team_members (repo_id, login) VALUES (?, ?)",
             (repo_id, login),
         )
+
+    # Merge common members into the set used for parsing (not persisted above)
+    members.update(common_logins)
 
     # Fetch and store issues
     # For incremental sync, use updated:>= for all states to catch
