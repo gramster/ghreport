@@ -9,14 +9,16 @@
         <label>Until <input type="date" v-model="dateRange.until" /></label>
         <span v-if="dateRange.backfilling" class="sync-indicator" title="Fetching older data...">⟳</span>
         <span v-else-if="syncActivity.syncing.length" class="sync-indicator"
-              :title="'Syncing: ' + syncActivity.syncing.join(', ')">⟳</span>
+              :class="{ 'sync-retrying': syncActivity.hasRetries }"
+              :title="syncActivity.syncTooltip">⟳</span>
       </div>
       <RepoSelector />
     </nav>
-    <div v-if="syncActivity.syncing.length" class="activity-banner">
+    <div v-if="syncActivity.syncing.length" class="activity-banner" :class="{ 'activity-banner-warning': syncActivity.hasRetries }">
       <div class="activity-banner-content">
         <span class="sync-indicator-inline">⟳</span>
-        <span>Syncing: {{ syncActivity.syncing.join(', ') }}</span>
+        <span v-if="syncActivity.hasRetries">Sync struggling: {{ retryBannerText }}</span>
+        <span v-else>Syncing: {{ syncActivity.syncing.join(', ') }}</span>
       </div>
     </div>
     <div v-if="syncActivity.errors.length" class="error-banner">
@@ -51,6 +53,19 @@ const latestError = computed(() => {
   return `${last.repo}: ${last.error}`
 })
 
+const retryBannerText = computed(() => {
+  const parts: string[] = []
+  for (const repo of syncActivity.syncing) {
+    const r = syncActivity.retries[repo]
+    if (r) {
+      parts.push(`${repo} (retry ${r.attempt}/${r.max_attempts})`)
+    } else {
+      parts.push(repo)
+    }
+  }
+  return parts.join(', ')
+})
+
 onMounted(() => {
   reposStore.fetchRepos()
   syncActivity.startPolling()
@@ -69,9 +84,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .nav-dates label { display: flex; align-items: center; gap: 0.3rem; color: #ffffffcc; font-size: 0.85rem; }
 .nav-dates input { padding: 0.25rem 0.4rem; border: 1px solid #586069; border-radius: 4px; background: #2f363d; color: #fff; font-size: 0.85rem; }
 .sync-indicator { animation: spin 1s linear infinite; font-size: 1.1rem; color: #f9826c; }
+.sync-indicator.sync-retrying { color: #e36209; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .activity-banner { background: #dcffe4; border-bottom: 1px solid #34d058; padding: 0.5rem 1.5rem; }
+.activity-banner.activity-banner-warning { background: #fff5b1; border-bottom-color: #f9c513; }
 .activity-banner-content { display: flex; align-items: center; gap: 0.5rem; max-width: 1200px; margin: 0 auto; font-size: 0.9rem; color: #165c26; }
+.activity-banner-warning .activity-banner-content { color: #735c0f; }
 .sync-indicator-inline { animation: spin 1s linear infinite; font-size: 1rem; }
 .error-banner { background: #ffeef0; border-bottom: 1px solid #fdaeb7; padding: 0.5rem 1.5rem; }
 .error-banner-content { display: flex; align-items: center; gap: 0.5rem; max-width: 1200px; margin: 0 auto; font-size: 0.9rem; color: #86181d; }

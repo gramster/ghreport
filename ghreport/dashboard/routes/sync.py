@@ -18,6 +18,7 @@ async def get_sync_activity(request: Request):
     scheduler = request.app.state.scheduler
     return {
         "syncing": sorted(scheduler.active_syncs),
+        "retries": scheduler.active_retries,
         "errors": scheduler.recent_errors,
     }
 

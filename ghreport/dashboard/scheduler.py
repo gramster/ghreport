@@ -11,6 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .cache import sync_repo
 from .config import Settings
 from .db import Database
+from ..core.fetcher import get_active_retries
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,10 @@ class SyncScheduler:
     @property
     def active_syncs(self) -> list[str]:
         return sorted(self._active_syncs)
+
+    @property
+    def active_retries(self) -> dict[str, dict]:
+        return get_active_retries()
 
     @property
     def recent_errors(self) -> list[dict]:

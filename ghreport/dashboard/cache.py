@@ -135,10 +135,12 @@ async def _sync_repo_inner(db: Database, owner: str, repo: str, token: str,
     issues_count = 0
     copilot_users: set[str] = set()
     incremental = since is not None
+    repo_key = f"{owner}/{repo}"
     for state in ('open', 'closed'):
         raw_issues = await get_raw_issues(
             owner, repo, token, state=state,
             since=since, use_updated=incremental,
+            repo_key=repo_key,
         )
         for raw in raw_issues:
             _collect_copilot_users(raw, copilot_users)
@@ -154,7 +156,8 @@ async def _sync_repo_inner(db: Database, owner: str, repo: str, token: str,
     for state in ('open', 'closed', 'merged'):
         s = since if (incremental or state != 'open') else None
         raw_prs = await get_raw_pull_requests(owner, repo, token, state=state, since=s,
-                                              use_updated=incremental)
+                                              use_updated=incremental,
+                                              repo_key=repo_key)
         for raw in raw_prs:
             _collect_copilot_users(raw, copilot_users)
             parsed = parse_raw_pull_request(raw)
