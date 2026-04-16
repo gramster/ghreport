@@ -87,6 +87,11 @@ def parse_raw_pull_request(pull_request: dict) -> PullRequest | None:
                 author = commit.get('author', {}) or {}
                 user = author.get('user') or {}
                 login = user.get('login', '')
+                # For bots/apps, user is null — derive login from name
+                if not login:
+                    name = author.get('name', '')
+                    if name and name.endswith('[bot]'):
+                        login = f"app/{name[:-5]}"
                 if login and login != created_by and login not in seen_collab:
                     seen_collab.add(login)
                     collaborators.append(login)

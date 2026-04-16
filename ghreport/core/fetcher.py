@@ -237,6 +237,7 @@ query ($cursor: String, $chunk: Int) {{
             nodes {{
               commit {{
                 author {{
+                  name
                   user {{
                     login
                   }}
@@ -297,6 +298,7 @@ query ($cursor: String, $chunk: Int) {{
             nodes {{
               commit {{
                 author {{
+                  name
                   user {{
                     login
                   }}
@@ -314,6 +316,7 @@ query ($cursor: String, $chunk: Int) {{
 
 async def get_raw_pull_requests(owner: str, repo: str, token: str, state: str = 'open',
                                 chunk: int = 100, since: datetime | None = None,
+                                use_updated: bool = False,
                                 verbose: bool = False, debug_log_list: list[str] | None = None) -> list[dict]:
     cursor = None
     pull_requests = []
@@ -334,7 +337,7 @@ async def get_raw_pull_requests(owner: str, repo: str, token: str, state: str = 
             query = merged_pull_requests_query.format(owner=owner, repo=repo,
                                                       since=since_str, until=until_str)
         else:
-            since_filter = f'updated:>={since_str}' if state == 'closed' else f'created:>={since_str}'
+            since_filter = f'updated:>={since_str}' if (state == 'closed' or use_updated) else f'created:>={since_str}'
             query = pull_requests_query.format(owner=owner, repo=repo, state=state,
                                                since_filter=since_filter)
 

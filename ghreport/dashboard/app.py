@@ -6,6 +6,8 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +17,8 @@ from .db import Database
 from .scheduler import SyncScheduler
 from .cache import scan_copilot_users
 from .routes import repos, issues, prs, reports, charts, aggregate, sync, team, members
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -37,11 +41,45 @@ async def lifespan(app: FastAPI):
     # Scan cached data for copilot users
     await scan_copilot_users(db)
 
+    # Check if reviewer/collaborator data needs to be populated
+    # (e.g. after schema change adding those tables)
+    await _maybe_resync_for_roles(db, scheduler)
+
     yield
 
     # Shutdown
     scheduler.stop()
     await db.close()
+
+
+async def _maybe_resync_for_roles(db: Database, scheduler: SyncScheduler):
+    """Trigger a full re-sync if reviewer/collaborator data is missing.
+
+    This handles the case where the GraphQL queries were updated to fetch
+    review/commit data but existing cached PRs don't have that info yet.
+    """
+    pr_count = (await (await db.db.execute(
+        "SELECT COUNT(*) FROM pull_requests"
+    )).fetchone())[0]
+    if pr_count == 0:
+        return
+
+    rev_count = (await (await db.db.execute(
+        "SELECT COUNT(*) FROM pr_reviewers"
+    )).fetchone())[0]
+    collab_count = (await (await db.db.execute(
+        "SELECT COUNT(*) FROM pr_collaborators"
+    )).fetchone())[0]
+
+    if rev_count == 0 and collab_count == 0:
+        logger.info(
+            "Detected %d PRs but no reviewer/collaborator data — "
+            "scheduling full re-sync to populate role data", pr_count,
+        )
+        repos_list = await db.get_all_repos()
+        import asyncio
+        for r in repos_list:
+            asyncio.create_task(scheduler.force_sync_one(r["owner"], r["name"]))
 
 
 def create_app(config_path: str | None = None) -> FastAPI:

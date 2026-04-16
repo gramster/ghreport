@@ -77,6 +77,22 @@ class SyncScheduler:
         except Exception:
             logger.exception("Failed initial sync %s/%s", owner, repo)
 
+    async def force_sync_one(self, owner: str, repo: str):
+        """Force a full re-sync for a single repo (no incremental)."""
+        team = _team_for(self.settings, owner, repo)
+        try:
+            result = await sync_repo(
+                self.db, owner, repo,
+                self.settings.github_token, team=team, force=True,
+            )
+            logger.info(
+                "Force re-sync %s/%s: %d issues, %d PRs",
+                owner, repo,
+                result["issues_fetched"], result["prs_fetched"],
+            )
+        except Exception:
+            logger.exception("Failed force re-sync %s/%s", owner, repo)
+
     async def backfill(self, owner: str, repo: str, since: datetime):
         """Fetch older data for a repo to cover a requested date range."""
         key = f"{owner}/{repo}"

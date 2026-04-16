@@ -128,7 +128,8 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
     prs_count = 0
     for state in ('open', 'closed', 'merged'):
         s = since if (incremental or state != 'open') else None
-        raw_prs = await get_raw_pull_requests(owner, repo, token, state=state, since=s)
+        raw_prs = await get_raw_pull_requests(owner, repo, token, state=state, since=s,
+                                              use_updated=incremental)
         for raw in raw_prs:
             _collect_copilot_users(raw, copilot_users)
             parsed = parse_raw_pull_request(raw)
