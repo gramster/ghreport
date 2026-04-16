@@ -8,13 +8,21 @@
         <label>Since <input type="date" v-model="dateRange.since" /></label>
         <label>Until <input type="date" v-model="dateRange.until" /></label>
         <span v-if="dateRange.backfilling" class="sync-indicator" title="Fetching older data...">⟳</span>
+        <span v-else-if="syncActivity.isRateLimited" class="sync-indicator sync-rate-limited"
+              :title="syncActivity.syncTooltip">⏸</span>
         <span v-else-if="syncActivity.syncing.length" class="sync-indicator"
               :class="{ 'sync-retrying': syncActivity.hasRetries }"
               :title="syncActivity.syncTooltip">⟳</span>
       </div>
       <RepoSelector />
     </nav>
-    <div v-if="syncActivity.syncing.length" class="activity-banner" :class="{ 'activity-banner-warning': syncActivity.hasRetries }">
+    <div v-if="syncActivity.isRateLimited" class="rate-limit-banner">
+      <div class="rate-limit-banner-content">
+        <span class="rate-limit-icon">⏸</span>
+        <span>GitHub API rate limited — cooling down ({{ rateLimitCountdown }})</span>
+      </div>
+    </div>
+    <div v-else-if="syncActivity.syncing.length" class="activity-banner" :class="{ 'activity-banner-warning': syncActivity.hasRetries }">
       <div class="activity-banner-content">
         <span class="sync-indicator-inline">⟳</span>
         <span v-if="syncActivity.hasRetries">Sync struggling: {{ retryBannerText }}</span>
@@ -66,6 +74,14 @@ const retryBannerText = computed(() => {
   return parts.join(', ')
 })
 
+const rateLimitCountdown = computed(() => {
+  const s = syncActivity.rateLimitRemaining
+  if (s <= 0) return '0s'
+  const m = Math.floor(s / 60)
+  const sec = s % 60
+  return m > 0 ? `${m}m ${sec}s` : `${sec}s`
+})
+
 onMounted(() => {
   reposStore.fetchRepos()
   syncActivity.startPolling()
@@ -85,7 +101,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .nav-dates input { padding: 0.25rem 0.4rem; border: 1px solid #586069; border-radius: 4px; background: #2f363d; color: #fff; font-size: 0.85rem; }
 .sync-indicator { animation: spin 1s linear infinite; font-size: 1.1rem; color: #f9826c; }
 .sync-indicator.sync-retrying { color: #e36209; }
+.sync-indicator.sync-rate-limited { animation: none; color: #e36209; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.rate-limit-banner { background: #fff1e5; border-bottom: 1px solid #f9826c; padding: 0.5rem 1.5rem; }
+.rate-limit-banner-content { display: flex; align-items: center; gap: 0.5rem; max-width: 1200px; margin: 0 auto; font-size: 0.9rem; color: #86181d; }
+.rate-limit-icon { font-size: 1.1rem; }
 .activity-banner { background: #dcffe4; border-bottom: 1px solid #34d058; padding: 0.5rem 1.5rem; }
 .activity-banner.activity-banner-warning { background: #fff5b1; border-bottom-color: #f9c513; }
 .activity-banner-content { display: flex; align-items: center; gap: 0.5rem; max-width: 1200px; margin: 0 auto; font-size: 0.9rem; color: #165c26; }

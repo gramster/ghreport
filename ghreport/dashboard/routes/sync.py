@@ -19,6 +19,7 @@ async def get_sync_activity(request: Request):
     return {
         "syncing": sorted(scheduler.active_syncs),
         "retries": scheduler.active_retries,
+        "rate_limited_until": scheduler.rate_limited_until,
         "errors": scheduler.recent_errors,
     }
 

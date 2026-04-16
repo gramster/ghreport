@@ -18,12 +18,28 @@ export interface RetryInfo {
 export const useSyncActivityStore = defineStore('syncActivity', () => {
   const syncing = ref<string[]>([])
   const retries = ref<Record<string, RetryInfo>>({})
+  const rateLimitedUntil = ref<string | null>(null)
   const errors = ref<SyncError[]>([])
   let pollTimer: ReturnType<typeof setInterval> | null = null
 
   const hasRetries = computed(() => Object.keys(retries.value).length > 0)
 
+  const isRateLimited = computed(() => {
+    if (!rateLimitedUntil.value) return false
+    return new Date(rateLimitedUntil.value) > new Date()
+  })
+
+  const rateLimitRemaining = computed(() => {
+    if (!rateLimitedUntil.value) return 0
+    const diff = new Date(rateLimitedUntil.value).getTime() - Date.now()
+    return Math.max(0, Math.ceil(diff / 1000))
+  })
+
   const syncTooltip = computed(() => {
+    if (isRateLimited.value) {
+      const mins = Math.ceil(rateLimitRemaining.value / 60)
+      return `Rate limited — cooldown ${mins}m remaining`
+    }
     const parts: string[] = []
     for (const repo of syncing.value) {
       const r = retries.value[repo]
@@ -41,6 +57,7 @@ export const useSyncActivityStore = defineStore('syncActivity', () => {
       const { data } = await axios.get('/api/sync/activity')
       syncing.value = data.syncing || []
       retries.value = data.retries || {}
+      rateLimitedUntil.value = data.rate_limited_until || null
       errors.value = data.errors || []
     } catch {
       // Silently ignore polling failures
@@ -69,5 +86,5 @@ export const useSyncActivityStore = defineStore('syncActivity', () => {
     }
   }
 
-  return { syncing, retries, errors, hasRetries, syncTooltip, poll, startPolling, stopPolling, dismissErrors }
+  return { syncing, retries, rateLimitedUntil, errors, hasRetries, isRateLimited, rateLimitRemaining, syncTooltip, poll, startPolling, stopPolling, dismissErrors }
 })

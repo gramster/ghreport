@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from .cache import sync_repo
 from .config import Settings
 from .db import Database
-from ..core.fetcher import get_active_retries
+from ..core.fetcher import get_active_retries, get_rate_limit_until, GitHubRateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,17 @@ class SyncScheduler:
         repos = await self.db.get_all_repos()
         logger.info("Starting scheduled sync for %d repos", len(repos))
         for r in repos:
+            # Check global rate-limit cooldown before each repo
+            cooldown = get_rate_limit_until()
+            if cooldown:
+                remaining = (cooldown - datetime.utcnow()).total_seconds()
+                if remaining > 0:
+                    logger.warning(
+                        "Skipping remaining repos — rate-limited for %.0fs",
+                        remaining,
+                    )
+                    break
+
             owner, name = r["owner"], r["name"]
             team = _team_for(self.settings, owner, name)
             key = f"{owner}/{name}"
@@ -64,6 +75,11 @@ class SyncScheduler:
                     owner, name,
                     result["issues_fetched"], result["prs_fetched"],
                 )
+            except GitHubRateLimitError as exc:
+                logger.warning("Rate-limited syncing %s/%s, aborting remaining repos", owner, name)
+                self._record_error(owner, name, exc)
+                self._active_syncs.discard(key)
+                break
             except Exception as exc:
                 logger.exception("Failed to sync %s/%s", owner, name)
                 self._record_error(owner, name, exc)
@@ -151,6 +167,11 @@ class SyncScheduler:
     @property
     def active_retries(self) -> dict[str, dict]:
         return get_active_retries()
+
+    @property
+    def rate_limited_until(self) -> str | None:
+        rl = get_rate_limit_until()
+        return rl.isoformat() + "Z" if rl else None
 
     @property
     def recent_errors(self) -> list[dict]:
