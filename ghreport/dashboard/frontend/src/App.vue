@@ -12,6 +12,12 @@
       </div>
       <RepoSelector />
     </nav>
+    <div v-if="syncActivity.syncing.length" class="activity-banner">
+      <div class="activity-banner-content">
+        <span class="sync-indicator-inline">⟳</span>
+        <span>Syncing: {{ syncActivity.syncing.join(', ') }}</span>
+      </div>
+    </div>
     <div v-if="syncActivity.errors.length" class="error-banner">
       <div class="error-banner-content">
         <span class="error-icon">⚠</span>
@@ -63,6 +69,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .nav-dates input { padding: 0.25rem 0.4rem; border: 1px solid #586069; border-radius: 4px; background: #2f363d; color: #fff; font-size: 0.85rem; }
 .sync-indicator { animation: spin 1s linear infinite; font-size: 1.1rem; color: #f9826c; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.activity-banner { background: #dcffe4; border-bottom: 1px solid #34d058; padding: 0.5rem 1.5rem; }
+.activity-banner-content { display: flex; align-items: center; gap: 0.5rem; max-width: 1200px; margin: 0 auto; font-size: 0.9rem; color: #165c26; }
+.sync-indicator-inline { animation: spin 1s linear infinite; font-size: 1rem; }
 .error-banner { background: #ffeef0; border-bottom: 1px solid #fdaeb7; padding: 0.5rem 1.5rem; }
 .error-banner-content { display: flex; align-items: center; gap: 0.5rem; max-width: 1200px; margin: 0 auto; font-size: 0.9rem; color: #86181d; }
 .error-icon { font-size: 1.1rem; }
