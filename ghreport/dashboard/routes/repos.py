@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
@@ -135,7 +133,7 @@ async def add_repo(request: Request, body: AddRepoRequest):
 
     # Trigger initial sync in the background
     scheduler = request.app.state.scheduler
-    asyncio.create_task(scheduler.sync_one(body.owner, body.repo))
+    scheduler.queue_sync(body.owner, body.repo)
 
     return {"owner": body.owner, "name": body.repo, "id": repo_id, "syncing": True}
 

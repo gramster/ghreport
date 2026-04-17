@@ -76,14 +76,11 @@ async def _maybe_resync_for_roles(db: Database, scheduler: SyncScheduler):
         "scheduling full re-sync to populate role data", stale, total,
     )
     repos_list = await db.get_all_repos()
-    import asyncio
 
-    async def _resync_all():
-        for r in repos_list:
-            await scheduler.force_sync_one(r["owner"], r["name"])
-            await asyncio.sleep(5)  # avoid rate-limiting between repos
+    for r in repos_list:
+        scheduler.queue_sync(r["owner"], r["name"], force=True)
 
-    asyncio.create_task(_resync_all())
+    logger.info("Queued %d repos for re-sync to populate role data", len(repos_list))
 
 
 def create_app(config_path: str | None = None) -> FastAPI:

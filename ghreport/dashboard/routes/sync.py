@@ -34,22 +34,25 @@ async def clear_sync_errors(request: Request):
 
 @router.post("/api/repos/{owner}/{repo}/sync")
 async def trigger_repo_sync(request: Request, owner: str, repo: str):
-    """Trigger manual sync for one repository (serialized through scheduler lock)."""
+    """Trigger manual sync for one repository."""
     db = request.app.state.db
     scheduler = request.app.state.scheduler
     repo_id = await db.get_repo_id(owner, repo)
     if not repo_id:
         raise HTTPException(404, f"Repository {owner}/{repo} not found")
 
-    asyncio.create_task(scheduler.force_sync_one(owner, repo))
+    scheduler.queue_sync(owner, repo, force=True)
     return {"status": "queued"}
 
 
 @router.post("/api/sync")
 async def trigger_full_sync(request: Request):
-    """Trigger sync for all repos (serialized through scheduler lock)."""
+    """Trigger sync for all repos."""
     scheduler = request.app.state.scheduler
-    asyncio.create_task(scheduler._sync_all())
+    db = request.app.state.db
+    repos = await db.get_all_repos()
+    for r in repos:
+        scheduler.queue_sync(r["owner"], r["name"])
     return {"status": "queued"}
 
 
