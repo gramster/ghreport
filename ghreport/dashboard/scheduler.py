@@ -48,6 +48,8 @@ class SyncScheduler:
         )
         self.scheduler.start()
         logger.info("Scheduler started (interval=%d min)", self.settings.sync_interval_minutes)
+        # Run initial sync immediately
+        asyncio.ensure_future(self._sync_all())
 
     def _check_rate_limit(self) -> bool:
         """Return True if rate-limited (should skip)."""
@@ -136,15 +138,28 @@ class SyncScheduler:
             await self._sync_one_repo(owner, repo, force=True)
 
     def queue_sync(self, owner: str, repo: str, force: bool = False):
-        """Add a repo to the priority queue for next sync cycle.
+        """Add a repo to the priority queue and trigger immediate processing.
 
         If a sync cycle is already running, the repo will be picked up
-        between the current and next repo in the batch.
+        between the current and next repo in the batch. If not, starts
+        a new _drain_queue task to process it right away.
         """
         key = (owner, repo, force)
         if key not in self._priority_queue:
             self._priority_queue.append(key)
             logger.info("Queued %s/%s for priority sync (force=%s)", owner, repo, force)
+        # Kick off processing if nothing is currently running
+        if not self._sync_lock.locked():
+            asyncio.ensure_future(self._drain_queue())
+
+    async def _drain_queue(self):
+        """Process priority queue items immediately."""
+        while self._priority_queue:
+            owner, repo, force = self._priority_queue.pop(0)
+            async with self._sync_lock:
+                ok = await self._sync_one_repo(owner, repo, force=force)
+            if not ok:
+                break  # rate-limited
 
     async def backfill(self, owner: str, repo: str, since: datetime):
         """Fetch older data for a repo to cover a requested date range."""
