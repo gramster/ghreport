@@ -7,29 +7,35 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-from copilot import CopilotClient, SubprocessConfig
-from copilot.generated.session_events import AssistantMessageData, SessionIdleData
-from copilot.session import PermissionHandler
-
 logger = logging.getLogger(__name__)
 
 _MODEL = "gpt-4o-mini"
 
 
-async def create_copilot_client(token: str) -> CopilotClient:
+def _import_copilot():
+    """Lazy-import copilot SDK to avoid breaking when not installed."""
+    from copilot import CopilotClient, SubprocessConfig
+    from copilot.generated.session_events import AssistantMessageData, SessionIdleData
+    from copilot.session import PermissionHandler
+    return CopilotClient, SubprocessConfig, AssistantMessageData, SessionIdleData, PermissionHandler
+
+
+async def create_copilot_client(token: str):
     """Create and start a CopilotClient for the app lifetime."""
+    CopilotClient, SubprocessConfig, *_ = _import_copilot()
     client = CopilotClient(SubprocessConfig(github_token=token))
     await client.start()
     return client
 
 
-async def stop_copilot_client(client: CopilotClient) -> None:
+async def stop_copilot_client(client) -> None:
     """Stop the CopilotClient."""
     await client.stop()
 
 
-async def _chat(client: CopilotClient, system: str, user: str) -> str:
+async def _chat(client, system: str, user: str) -> str:
     """Send a one-shot message and return the text response."""
+    _, _, AssistantMessageData, SessionIdleData, PermissionHandler = _import_copilot()
     result_text = ""
     done = asyncio.Event()
 
