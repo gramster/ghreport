@@ -1,8 +1,7 @@
-"""AI-powered insights using the GitHub Copilot SDK."""
+"""AI-powered insights using the GitHub Models API (models.inference.ai.azure.com)."""
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -10,55 +9,26 @@ from datetime import datetime, timedelta, timezone
 logger = logging.getLogger(__name__)
 
 _MODEL = "gpt-4o-mini"
+_BASE_URL = "https://models.inference.ai.azure.com"
 
 
-def _import_copilot():
-    """Lazy-import copilot SDK to avoid breaking when not installed."""
-    from copilot import CopilotClient, SubprocessConfig
-    from copilot.generated.session_events import AssistantMessageData, SessionIdleData
-    from copilot.session import PermissionHandler
-    return CopilotClient, SubprocessConfig, AssistantMessageData, SessionIdleData, PermissionHandler
-
-
-async def create_copilot_client(token: str):
-    """Create and start a CopilotClient for the app lifetime."""
-    CopilotClient, SubprocessConfig, *_ = _import_copilot()
-    client = CopilotClient(SubprocessConfig(github_token=token))
-    await client.start()
-    return client
-
-
-async def stop_copilot_client(client) -> None:
-    """Stop the CopilotClient."""
-    await client.stop()
+def _get_openai_client(token: str):
+    """Lazy-import openai and return an AsyncOpenAI pointed at GitHub Models."""
+    from openai import AsyncOpenAI
+    return AsyncOpenAI(base_url=_BASE_URL, api_key=token)
 
 
 async def _chat(client, system: str, user: str) -> str:
-    """Send a one-shot message and return the text response."""
-    _, _, AssistantMessageData, SessionIdleData, PermissionHandler = _import_copilot()
-    result_text = ""
-    done = asyncio.Event()
-
-    async with await client.create_session(
+    """Send a one-shot chat completion and return the text response."""
+    resp = await client.chat.completions.create(
         model=_MODEL,
-        on_permission_request=PermissionHandler.approve_all,
-        system_message={"content": system},
-        infinite_sessions={"enabled": False},
-    ) as session:
-
-        def on_event(event):
-            nonlocal result_text
-            match event.data:
-                case AssistantMessageData() as data:
-                    result_text = data.content or ""
-                case SessionIdleData():
-                    done.set()
-
-        session.on(on_event)
-        await session.send(user)
-        await done.wait()
-
-    return result_text
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.3,
+    )
+    return resp.choices[0].message.content or ""
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +44,7 @@ Output markdown bullet points only, no headings."""
 
 
 async def generate_digest(
-    client: CopilotClient,
+    client,
     owner: str,
     repo: str,
     summary: dict,
@@ -117,7 +87,7 @@ Output 2-5 markdown bullet points. If nothing is anomalous, say so briefly."""
 
 
 async def detect_anomalies(
-    client: CopilotClient,
+    client,
     owner: str,
     repo: str,
     current: dict,
@@ -153,7 +123,7 @@ Only output the JSON, no markdown fences or commentary."""
 
 
 async def cluster_issues(
-    client: CopilotClient,
+    client,
     owner: str,
     repo: str,
     issues: list[dict],
