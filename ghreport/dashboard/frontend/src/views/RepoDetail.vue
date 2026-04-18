@@ -15,6 +15,7 @@
       <router-link :to="{ name: 'issue-revisits', params: { owner, repo } }">Revisits</router-link>
       <router-link :to="{ name: 'pr-activity', params: { owner, repo } }">PR Activity</router-link>
       <router-link :to="{ name: 'closed-issues', params: { owner, repo } }">Closed Issues</router-link>
+      <router-link :to="{ name: 'insights', params: { owner, repo } }">Insights</router-link>
     </div>
 
     <div v-if="loading" class="loading">Loading...</div>

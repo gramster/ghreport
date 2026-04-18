@@ -16,7 +16,7 @@ from .config import Settings, load_settings
 from .db import Database
 from .scheduler import SyncScheduler
 from .cache import scan_copilot_users
-from .routes import repos, issues, prs, reports, charts, aggregate, sync, team, members
+from .routes import repos, issues, prs, reports, charts, aggregate, sync, team, members, insights
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.include_router(sync.router)
     app.include_router(team.router)
     app.include_router(members.router)
+    app.include_router(insights.router)
 
     # Mount Vue frontend static files (if built)
     frontend_dist = Path(__file__).parent / "frontend" / "dist"

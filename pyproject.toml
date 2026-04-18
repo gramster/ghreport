@@ -33,6 +33,7 @@ dashboard = [
     "aiosqlite>=0.20",
     "apscheduler>=3.10,<4",
     "pydantic-settings>=2.2",
+    "openai>=1.30",
 ]
 
 [project.urls]

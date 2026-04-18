@@ -33,6 +33,12 @@ const router = createRouter({
       props: true,
     },
     {
+      path: '/repo/:owner/:repo/insights',
+      name: 'insights',
+      component: () => import('@/views/Insights.vue'),
+      props: true,
+    },
+    {
       path: '/repos',
       name: 'repositories',
       component: () => import('@/views/Repositories.vue'),
