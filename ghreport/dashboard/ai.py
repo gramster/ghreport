@@ -1,42 +1,58 @@
-"""AI-powered insights using GitHub Models API (OpenAI-compatible)."""
+"""AI-powered insights using the GitHub Copilot SDK."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-from openai import AsyncOpenAI
+from copilot import CopilotClient, SubprocessConfig
+from copilot.generated.session_events import AssistantMessageData, SessionIdleData
+from copilot.session import PermissionHandler
 
 logger = logging.getLogger(__name__)
 
-# GitHub Models endpoint — uses the user's GH_TOKEN for auth
-_ENDPOINT = "https://models.inference.ai.azure.com"
 _MODEL = "gpt-4o-mini"
 
-_client: AsyncOpenAI | None = None
+
+async def create_copilot_client(token: str) -> CopilotClient:
+    """Create and start a CopilotClient for the app lifetime."""
+    client = CopilotClient(SubprocessConfig(github_token=token))
+    await client.start()
+    return client
 
 
-def _get_client(token: str) -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        _client = AsyncOpenAI(base_url=_ENDPOINT, api_key=token)
-    return _client
+async def stop_copilot_client(client: CopilotClient) -> None:
+    """Stop the CopilotClient."""
+    await client.stop()
 
 
-async def _chat(token: str, system: str, user: str, max_tokens: int = 2048) -> str:
-    """Send a chat completion request and return the text response."""
-    client = _get_client(token)
-    resp = await client.chat.completions.create(
+async def _chat(client: CopilotClient, system: str, user: str) -> str:
+    """Send a one-shot message and return the text response."""
+    result_text = ""
+    done = asyncio.Event()
+
+    async with await client.create_session(
         model=_MODEL,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        max_tokens=max_tokens,
-        temperature=0.3,
-    )
-    return resp.choices[0].message.content or ""
+        on_permission_request=PermissionHandler.approve_all,
+        system_message={"content": system},
+        infinite_sessions={"enabled": False},
+    ) as session:
+
+        def on_event(event):
+            nonlocal result_text
+            match event.data:
+                case AssistantMessageData() as data:
+                    result_text = data.content or ""
+                case SessionIdleData():
+                    done.set()
+
+        session.on(on_event)
+        await session.send(user)
+        await done.wait()
+
+    return result_text
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +68,7 @@ Output markdown bullet points only, no headings."""
 
 
 async def generate_digest(
-    token: str,
+    client: CopilotClient,
     owner: str,
     repo: str,
     summary: dict,
@@ -73,7 +89,7 @@ async def generate_digest(
         "time_to_response_by_month": _summarize_monthly(time_to_response.get("months", {})),
     }
     return await _chat(
-        token,
+        client,
         _DIGEST_SYSTEM,
         json.dumps(payload, default=str),
     )
@@ -95,7 +111,7 @@ Output 2-5 markdown bullet points. If nothing is anomalous, say so briefly."""
 
 
 async def detect_anomalies(
-    token: str,
+    client: CopilotClient,
     owner: str,
     repo: str,
     current: dict,
@@ -108,7 +124,7 @@ async def detect_anomalies(
         "historical_baseline": baseline,
     }
     return await _chat(
-        token,
+        client,
         _ANOMALY_SYSTEM,
         json.dumps(payload, default=str),
     )
@@ -131,7 +147,7 @@ Only output the JSON, no markdown fences or commentary."""
 
 
 async def cluster_issues(
-    token: str,
+    client: CopilotClient,
     owner: str,
     repo: str,
     issues: list[dict],
@@ -149,10 +165,9 @@ async def cluster_issues(
         "issues": items,
     }
     raw = await _chat(
-        token,
+        client,
         _CLUSTER_SYSTEM,
         json.dumps(payload, default=str),
-        max_tokens=3000,
     )
     try:
         parsed = json.loads(raw)

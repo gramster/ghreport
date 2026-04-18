@@ -16,6 +16,7 @@ from .config import Settings, load_settings
 from .db import Database
 from .scheduler import SyncScheduler
 from .cache import scan_copilot_users
+from .ai import create_copilot_client, stop_copilot_client
 from .routes import repos, issues, prs, reports, charts, aggregate, sync, team, members, insights
 
 logger = logging.getLogger(__name__)
@@ -45,9 +46,24 @@ async def lifespan(app: FastAPI):
     # (e.g. after schema change adding those tables)
     await _maybe_resync_for_roles(db, scheduler)
 
+    # Start Copilot SDK client for AI insights (if token available)
+    token = settings.github_token
+    if token:
+        try:
+            copilot = await create_copilot_client(token)
+            app.state.copilot_client = copilot
+            logger.info("Copilot SDK client started for AI insights")
+        except Exception:
+            logger.warning("Failed to start Copilot SDK client — AI insights disabled", exc_info=True)
+            app.state.copilot_client = None
+    else:
+        app.state.copilot_client = None
+
     yield
 
     # Shutdown
+    if app.state.copilot_client is not None:
+        await stop_copilot_client(app.state.copilot_client)
     scheduler.stop()
     await db.close()
 

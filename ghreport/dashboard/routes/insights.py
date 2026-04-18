@@ -34,11 +34,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/repos/{owner}/{repo}/insights", tags=["insights"])
 
 
-def _get_token(request: Request) -> str:
-    token = request.app.state.settings.github_token
-    if not token:
-        raise HTTPException(503, "No GitHub token configured — required for AI insights")
-    return token
+def _get_copilot_client(request: Request):
+    client = request.app.state.copilot_client
+    if client is None:
+        raise HTTPException(503, "Copilot SDK not available — check GitHub token configuration")
+    return client
 
 
 async def _get_repo_id_or_404(request: Request, owner: str, repo: str) -> int:
@@ -117,7 +117,7 @@ async def get_digest(
     until: str | None = Query(None),
 ):
     """AI-generated narrative summary of repository activity."""
-    token = _get_token(request)
+    client = _get_copilot_client(request)
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
     since_dt = parse_date_param(since)
@@ -128,7 +128,7 @@ async def get_digest(
     summary, revisits, pr_act, ttm, ttc, ttr = await _collect_metrics(
         db, repo_id, owner, repo, since_dt, until_dt, days)
 
-    digest = await generate_digest(token, owner, repo, summary, revisits, pr_act, ttm, ttc, ttr)
+    digest = await generate_digest(client, owner, repo, summary, revisits, pr_act, ttm, ttc, ttr)
     return {"digest": digest, "days": days}
 
 
@@ -158,7 +158,7 @@ async def get_anomalies(
     until: str | None = Query(None),
 ):
     """Detect anomalies by comparing recent period vs historical baseline."""
-    token = _get_token(request)
+    client = _get_copilot_client(request)
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
     since_dt = parse_date_param(since)
@@ -218,7 +218,7 @@ async def get_anomalies(
             _flatten_monthly(ttr_baseline), lambda x: x),
     }
 
-    anomalies = await detect_anomalies(token, owner, repo, current, baseline)
+    anomalies = await detect_anomalies(client, owner, repo, current, baseline)
     return {"anomalies": anomalies, "days": days}
 
 
@@ -233,7 +233,7 @@ async def get_clusters(
     repo: str,
 ):
     """Cluster open issues by topic using AI analysis."""
-    token = _get_token(request)
+    client = _get_copilot_client(request)
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
 
@@ -263,5 +263,5 @@ async def get_clusters(
     if not issues_for_clustering:
         return {"clusters": [], "total_issues": 0}
 
-    clusters = await cluster_issues(token, owner, repo, issues_for_clustering)
+    clusters = await cluster_issues(client, owner, repo, issues_for_clustering)
     return {"clusters": clusters, "total_issues": len(issues_for_clustering)}
