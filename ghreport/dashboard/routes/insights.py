@@ -79,8 +79,9 @@ async def _collect_metrics(db, repo_id, owner, repo, since_dt, until_dt, days):
 
     issues_open = filter_active_issues(
         await get_cached_issues(db, repo_id, state="open"), since_dt, until_dt)
-    issues_all = filter_active_issues(
-        await get_cached_issues(db, repo_id), since_dt, until_dt)
+    issues_closed = filter_active_issues(
+        await get_cached_issues(db, repo_id, state="closed"), since_dt, until_dt)
+    issues_all = issues_open + issues_closed
     prs_all = filter_active_prs(
         await get_cached_prs(db, repo_id), since_dt, until_dt)
     prs_open = filter_active_prs(
@@ -96,7 +97,8 @@ async def _collect_metrics(db, repo_id, owner, repo, since_dt, until_dt, days):
     pr_act = pr_activity_data(now, owner, repo, prs_open, prs_closed, days=days)
     ttm = time_to_merge_data(prs_all)
     ttc = time_to_close_issues_data(issues_all)
-    ttr = time_to_first_response_data(issues_all, since_dt)
+    resp_since = since_dt or (now - timedelta(days=180))
+    ttr = time_to_first_response_data(issues_open, issues_closed, since=resp_since)
 
     return summary, revisits, pr_act, ttm, ttc, ttr
 
