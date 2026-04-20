@@ -8,7 +8,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gpt-4o"
+_MODEL = "gpt-4.1"
 
 
 async def create_copilot_client():
