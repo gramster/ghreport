@@ -37,7 +37,7 @@ router = APIRouter(prefix="/api/repos/{owner}/{repo}/insights", tags=["insights"
 def _get_ai_client(request: Request):
     client = request.app.state.ai_client
     if client is None:
-        raise HTTPException(503, "AI insights not available — check GitHub token configuration")
+        raise HTTPException(503, "AI insights not available — Copilot SDK failed to initialize")
     return client
 
 

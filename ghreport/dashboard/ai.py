@@ -1,34 +1,55 @@
-"""AI-powered insights using the GitHub Models API (models.inference.ai.azure.com)."""
+"""AI-powered insights using the GitHub Copilot SDK."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
 _MODEL = "gpt-4o-mini"
-_BASE_URL = "https://models.inference.ai.azure.com"
 
 
-def _get_openai_client(token: str):
-    """Lazy-import openai and return an AsyncOpenAI pointed at GitHub Models."""
-    from openai import AsyncOpenAI
-    return AsyncOpenAI(base_url=_BASE_URL, api_key=token)
+async def create_copilot_client():
+    """Create and start a CopilotClient instance."""
+    from copilot import CopilotClient
+    client = CopilotClient()
+    await client.start()
+    return client
+
+
+async def close_copilot_client(client):
+    """Stop a CopilotClient instance."""
+    if client is not None:
+        await client.stop()
 
 
 async def _chat(client, system: str, user: str) -> str:
-    """Send a one-shot chat completion and return the text response."""
-    resp = await client.chat.completions.create(
+    """Send a one-shot message via Copilot SDK and return the text response."""
+    from copilot.session import PermissionHandler
+
+    result = ""
+    done = asyncio.Event()
+
+    async with await client.create_session(
+        on_permission_request=PermissionHandler.approve_all,
         model=_MODEL,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        temperature=0.3,
-    )
-    return resp.choices[0].message.content or ""
+        system_message={"content": system},
+        infinite_sessions={"enabled": False},
+    ) as session:
+        def on_event(event):
+            nonlocal result
+            if event.type.value == "assistant.message":
+                result = event.data.content or ""
+            elif event.type.value == "session.idle":
+                done.set()
+
+        session.on(on_event)
+        await session.send(user)
+        await done.wait()
+
+    return result
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ from .config import Settings, load_settings
 from .db import Database
 from .scheduler import SyncScheduler
 from .cache import scan_copilot_users
-from .ai import _get_openai_client
+from .ai import create_copilot_client, close_copilot_client
 from .routes import repos, issues, prs, reports, charts, aggregate, sync, team, members, insights
 
 logger = logging.getLogger(__name__)
@@ -46,23 +46,18 @@ async def lifespan(app: FastAPI):
     # (e.g. after schema change adding those tables)
     await _maybe_resync_for_roles(db, scheduler)
 
-    # Create OpenAI client for AI insights (GitHub Models API)
-    token = settings.github_token
-    if token:
-        try:
-            app.state.ai_client = _get_openai_client(token)
-            logger.info("AI insights client ready (GitHub Models API)")
-        except Exception:
-            logger.warning("Failed to create AI client — AI insights disabled", exc_info=True)
-            app.state.ai_client = None
-    else:
+    # Create Copilot SDK client for AI insights (authenticated via GitHub login)
+    try:
+        app.state.ai_client = await create_copilot_client()
+        logger.info("AI insights client ready (GitHub Copilot SDK)")
+    except Exception:
+        logger.warning("Failed to create Copilot client — AI insights disabled", exc_info=True)
         app.state.ai_client = None
 
     yield
 
     # Shutdown
-    if app.state.ai_client is not None:
-        await app.state.ai_client.close()
+    await close_copilot_client(app.state.ai_client)
     scheduler.stop()
     await db.close()
 
