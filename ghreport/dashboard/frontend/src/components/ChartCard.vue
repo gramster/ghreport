@@ -17,6 +17,7 @@ import OpenIssueChart from '@/components/charts/OpenIssueChart.vue'
 import MonthBoxChart from '@/components/charts/MonthBoxChart.vue'
 import LabelBarChart from '@/components/charts/LabelBarChart.vue'
 import TermList from '@/components/charts/TermList.vue'
+import WeeklyLineChart from '@/components/charts/WeeklyLineChart.vue'
 
 const props = defineProps<{
   title: string
@@ -39,6 +40,9 @@ const chartComponent = computed(() => {
     case 'open-issues': return OpenIssueChart
     case 'label-frequency': return LabelBarChart
     case 'top-terms': return TermList
+    case 'time-to-combined':
+    case 'activity-counts':
+      return WeeklyLineChart
     default: return MonthBoxChart
   }
 })

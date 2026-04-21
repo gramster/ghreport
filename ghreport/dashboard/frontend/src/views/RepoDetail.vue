@@ -46,9 +46,8 @@
       <h3 style="margin-top: 1rem;">Charts</h3>
       <div class="grid">
         <ChartCard :key="'open-issues-'+syncVersion" title="Open Issues" :owner="owner" :repo="repo" chart-type="open-issues" />
-        <ChartCard :key="'time-to-merge-'+syncVersion" title="Time to Merge (days)" :owner="owner" :repo="repo" chart-type="time-to-merge" />
-        <ChartCard :key="'time-to-close-'+syncVersion" title="Time to Close (days)" :owner="owner" :repo="repo" chart-type="time-to-close" />
-        <ChartCard :key="'time-to-response-'+syncVersion" title="Time to Response (days)" :owner="owner" :repo="repo" chart-type="time-to-response" />
+        <ChartCard :key="'time-to-combined-'+syncVersion" title="Response Times (median days/week)" :owner="owner" :repo="repo" chart-type="time-to-combined" y-label="Days" />
+        <ChartCard :key="'activity-counts-'+syncVersion" title="Weekly Activity Counts" :owner="owner" :repo="repo" chart-type="activity-counts" y-label="Count" />
         <ChartCard :key="'label-frequency-'+syncVersion" title="Label Frequency" :owner="owner" :repo="repo" chart-type="label-frequency" />
         <ChartCard :key="'files-changed-'+syncVersion" title="Files Changed/PR" :owner="owner" :repo="repo" chart-type="files-changed" y-label="Files" />
         <ChartCard :key="'lines-changed-'+syncVersion" title="Lines Changed/PR" :owner="owner" :repo="repo" chart-type="lines-changed" y-label="Lines" />

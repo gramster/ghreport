@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Query, Request
 
 from ...core.analyzer import (
+    activity_counts_weekly_data,
     closed_issues_data,
     files_changed_data,
     label_frequency_data,
@@ -15,6 +16,7 @@ from ...core.analyzer import (
     pr_activity_data,
     revisits_data,
     time_to_close_issues_data,
+    time_to_combined_weekly_data,
     time_to_first_response_data,
     time_to_merge_data,
     top_files_data,
@@ -158,6 +160,38 @@ async def aggregate_chart(
     elif chart_type == "top-files":
         prs = await _collect_all_prs(request, since_dt=since_dt, until_dt=until_dt)
         return top_files_data(prs, min_count=min_count)
+    elif chart_type == "time-to-combined":
+        merged_prs = await _collect_all_prs(
+            request, state="merged",
+            since_dt=since_dt, until_dt=until_dt)
+        closed_issues = await _collect_all_issues(
+            request, state="closed",
+            since_dt=since_dt, until_dt=until_dt)
+        open_issues = await _collect_all_issues(
+            request, state="open",
+            since_dt=since_dt, until_dt=until_dt,
+            enrich_response=True)
+        enrich_resp_issues = await _collect_all_issues(
+            request, state="closed",
+            since_dt=since_dt, until_dt=until_dt,
+            enrich_response=True)
+        resp_since = since_dt or (
+            datetime.now(tz=timezone.utc)
+            - timedelta(days=months * 30))
+        return time_to_combined_weekly_data(
+            merged_prs, enrich_resp_issues,
+            open_issues, since=resp_since)
+    elif chart_type == "activity-counts":
+        issues = await _collect_all_issues(
+            request, since_dt=since_dt, until_dt=until_dt)
+        merged_prs = await _collect_all_prs(
+            request, state="merged",
+            since_dt=since_dt, until_dt=until_dt)
+        closed_prs = await _collect_all_prs(
+            request, state="closed",
+            since_dt=since_dt, until_dt=until_dt)
+        return activity_counts_weekly_data(
+            issues, merged_prs, closed_prs)
     else:
         from fastapi import HTTPException
         raise HTTPException(400, f"Unknown chart type: {chart_type}")

@@ -7,11 +7,13 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from ...core.analyzer import (
+    activity_counts_weekly_data,
     files_changed_data,
     label_frequency_data,
     lines_changed_data,
     open_issue_counts_data,
     time_to_close_issues_data,
+    time_to_combined_weekly_data,
     time_to_first_response_data,
     time_to_merge_data,
     top_files_data,
@@ -224,3 +226,64 @@ async def chart_top_files(
     prs = await get_cached_prs(db, repo_id)
     prs = filter_active_prs(prs, since_dt, until_dt)
     return top_files_data(prs, min_count=min_count)
+
+
+@router.get("/time-to-combined")
+async def chart_time_to_combined(
+    request: Request,
+    owner: str,
+    repo: str,
+    months: int = Query(12, ge=1, le=60),
+    since: str | None = Query(None),
+    until: str | None = Query(None),
+):
+    """Weekly median time-to-merge, close, and respond."""
+    db = request.app.state.db
+    repo_id = await _get_repo_id_or_404(request, owner, repo)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
+
+    merged_prs = filter_active_prs(
+        await get_cached_prs(db, repo_id, state="merged"),
+        since_dt, until_dt)
+    closed_issues = filter_active_issues(
+        await get_cached_issues(db, repo_id, state="closed"),
+        since_dt, until_dt)
+    open_issues = filter_active_issues(
+        await get_cached_issues(db, repo_id, state="open"),
+        since_dt, until_dt)
+
+    members = await get_cached_team_members(db, repo_id)
+    enrich_team_response(open_issues, members)
+    enrich_team_response(closed_issues, members)
+
+    resp_since = since_dt or (
+        datetime.now(tz=timezone.utc) - timedelta(days=months * 30))
+    return time_to_combined_weekly_data(
+        merged_prs, closed_issues, open_issues, since=resp_since)
+
+
+@router.get("/activity-counts")
+async def chart_activity_counts(
+    request: Request,
+    owner: str,
+    repo: str,
+    since: str | None = Query(None),
+    until: str | None = Query(None),
+):
+    """Weekly counts of new issues, merged PRs, closed PRs."""
+    db = request.app.state.db
+    repo_id = await _get_repo_id_or_404(request, owner, repo)
+    since_dt = parse_date_param(since)
+    until_dt = parse_date_param(until, end_of_day=True)
+
+    issues = filter_active_issues(
+        await get_cached_issues(db, repo_id), since_dt, until_dt)
+    merged_prs = filter_active_prs(
+        await get_cached_prs(db, repo_id, state="merged"),
+        since_dt, until_dt)
+    closed_prs = filter_active_prs(
+        await get_cached_prs(db, repo_id, state="closed"),
+        since_dt, until_dt)
+    return activity_counts_weekly_data(
+        issues, merged_prs, closed_prs)

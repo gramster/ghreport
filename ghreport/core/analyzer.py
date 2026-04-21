@@ -49,6 +49,55 @@ def calculate_ranges(data: list[PullRequest] | list[Issue],
     return months
 
 
+def _iso_week_label(dt: datetime) -> str:
+    """Return an ISO-week label like '25-W03'."""
+    iso = dt.isocalendar()
+    return f'{iso.year % 100:02}-W{iso.week:02}'
+
+
+def calculate_weekly_medians(
+    data: list[PullRequest] | list[Issue],
+    get_date: Callable[[Any], datetime],
+    get_metric: Callable[[Any], float | int],
+    since: datetime | None = None,
+) -> dict[str, float]:
+    """Bucket items by ISO week and return median per week."""
+    if since is not None:
+        since = utc_to_local(since)
+    weeks: dict[str, list[float]] = {}
+    for item in data:
+        dt = get_date(item)
+        if since is not None and dt < since:
+            continue
+        try:
+            metric = get_metric(item)
+            key = _iso_week_label(dt)
+            weeks.setdefault(key, []).append(metric)
+        except Exception:
+            pass
+    return {k: median(v) for k, v in sorted(weeks.items())}
+
+
+def count_by_week(
+    data: list[PullRequest] | list[Issue],
+    get_date: Callable[[Any], datetime | None],
+    since: datetime | None = None,
+) -> dict[str, int]:
+    """Count items per ISO week."""
+    if since is not None:
+        since = utc_to_local(since)
+    weeks: dict[str, int] = {}
+    for item in data:
+        dt = get_date(item)
+        if dt is None:
+            continue
+        if since is not None and dt < since:
+            continue
+        key = _iso_week_label(dt)
+        weeks[key] = weeks.get(key, 0) + 1
+    return dict(sorted(weeks.items()))
+
+
 def calculate_medians(data: list[PullRequest] | list[Issue],
                       get_start_date: Callable[[Any], datetime],
                       get_metric: Callable[[Any], int],
@@ -283,6 +332,52 @@ def time_to_first_response_data(open_issues: list[Issue], closed_issues: list[Is
                               lambda x: date_diff(x.first_team_response_at, x.created_at).days,
                               since=since)
     return {"months": {k: sorted(v) for k, v in sorted(ranges.items())}}
+
+
+def time_to_combined_weekly_data(
+    merged_prs: list[PullRequest],
+    closed_issues: list[Issue],
+    open_issues: list[Issue],
+    since: datetime | None = None,
+) -> dict[str, Any]:
+    """Weekly median time-to-merge, time-to-close, time-to-respond."""
+    ttm = calculate_weekly_medians(
+        merged_prs, lambda x: x.merged_at,
+        lambda x: date_diff(x.merged_at, x.created_at).days)
+    ttc = calculate_weekly_medians(
+        closed_issues, lambda x: x.closed_at,
+        lambda x: date_diff(x.closed_at, x.created_at).days)
+    all_issues = list(open_issues) + list(closed_issues)
+    ttr = calculate_weekly_medians(
+        all_issues, lambda x: x.created_at,
+        lambda x: date_diff(
+            x.first_team_response_at, x.created_at).days,
+        since=since)
+    weeks = sorted(set(ttm) | set(ttc) | set(ttr))
+    return {
+        "weeks": weeks,
+        "time_to_merge": [ttm.get(w) for w in weeks],
+        "time_to_close": [ttc.get(w) for w in weeks],
+        "time_to_respond": [ttr.get(w) for w in weeks],
+    }
+
+
+def activity_counts_weekly_data(
+    issues: list[Issue],
+    merged_prs: list[PullRequest],
+    closed_prs: list[PullRequest],
+) -> dict[str, Any]:
+    """Weekly counts of new issues, merged PRs, closed PRs."""
+    new_issues = count_by_week(issues, lambda x: x.created_at)
+    merged = count_by_week(merged_prs, lambda x: x.merged_at)
+    closed = count_by_week(closed_prs, lambda x: x.closed_at)
+    weeks = sorted(set(new_issues) | set(merged) | set(closed))
+    return {
+        "weeks": weeks,
+        "new_issues": [new_issues.get(w, 0) for w in weeks],
+        "merged_prs": [merged.get(w, 0) for w in weeks],
+        "closed_prs": [closed.get(w, 0) for w in weeks],
+    }
 
 
 def label_frequency_data(issues: list[Issue]) -> dict[str, Any]:
