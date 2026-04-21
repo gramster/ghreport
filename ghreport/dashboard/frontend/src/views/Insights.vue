@@ -12,7 +12,7 @@
     <div class="tab-buttons" style="margin-bottom: 1rem;">
       <button :class="{ active: activeTab === 'digest' }" @click="activeTab = 'digest'">Activity Digest</button>
       <button :class="{ active: activeTab === 'anomalies' }" @click="activeTab = 'anomalies'" style="margin-left: 0.5rem;">Anomaly Detection</button>
-      <button :class="{ active: activeTab === 'clusters' }" @click="activeTab = 'clusters'" style="margin-left: 0.5rem;">Issue Clusters</button>
+      <button :class="{ active: activeTab === 'clusters' }" @click="switchToClusters" style="margin-left: 0.5rem;">Issue Clusters</button>
     </div>
 
     <!-- Activity Digest -->
@@ -58,15 +58,15 @@
       <div class="card insight-card">
         <div class="insight-header">
           <h3>Issue Clusters</h3>
-          <button class="primary" @click="loadClusters" :disabled="clustersLoading">
-            {{ clustersLoading ? 'Clustering...' : (clusters ? 'Re-cluster' : 'Cluster') }}
+          <button class="primary" @click="loadClusters(true)" :disabled="clustersLoading">
+            {{ clustersLoading ? 'Clustering...' : 'Re-cluster' }}
           </button>
         </div>
         <div v-if="clustersLoading" class="loading">
           <span class="spinner">↻</span> Grouping issues by topic...
         </div>
         <template v-else-if="clusters && clusters.length > 0">
-          <p class="hint-text" style="margin-bottom: 0.75rem;">{{ totalIssues }} open issues grouped into {{ clusters.length }} clusters</p>
+          <p class="hint-text" style="margin-bottom: 0.75rem;">{{ totalIssues }} open issues grouped into {{ clusters.length }} clusters<span v-if="fromCache"> (cached)</span></p>
           <div v-for="(cluster, idx) in clusters" :key="idx" class="cluster-card">
             <div class="cluster-header">
               <strong>{{ cluster.name }}</strong>
@@ -87,14 +87,16 @@
         </template>
         <p v-else-if="clusters && clusters.length === 0" class="hint-text">No open issues to cluster.</p>
         <p v-else-if="clustersError" class="error-text">{{ clustersError }}</p>
-        <p v-else class="hint-text">Click Cluster to group open issues by topic using AI.</p>
+        <div v-else class="loading">
+          <span class="spinner">↻</span> Loading cached clusters...
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import axios from 'axios'
 import { useDateRangeStore } from '@/stores/dateRange'
 
@@ -134,6 +136,7 @@ const issueTitles = ref<IssueTitleMap>({})
 const totalIssues = ref(0)
 const clustersLoading = ref(false)
 const clustersError = ref('')
+const fromCache = ref(false)
 
 function renderMd(text: string): string {
   // Minimal markdown: bold, bullets, inline code
@@ -176,18 +179,28 @@ async function loadAnomalies() {
   }
 }
 
-async function loadClusters() {
+async function loadClusters(force = false) {
   clustersLoading.value = true
   clustersError.value = ''
   try {
-    const { data } = await axios.get(`/api/repos/${props.owner}/${props.repo}/insights/clusters`)
+    const { data } = await axios.get(`/api/repos/${props.owner}/${props.repo}/insights/clusters`, {
+      params: force ? { force: true } : {},
+    })
     clusters.value = data.clusters
     issueTitles.value = data.issue_titles || {}
     totalIssues.value = data.total_issues
+    fromCache.value = !!data.from_cache
   } catch (e: any) {
     clustersError.value = e.response?.data?.detail || 'Failed to cluster issues'
   } finally {
     clustersLoading.value = false
+  }
+}
+
+function switchToClusters() {
+  activeTab.value = 'clusters'
+  if (!clusters.value) {
+    loadClusters(false)
   }
 }
 </script>

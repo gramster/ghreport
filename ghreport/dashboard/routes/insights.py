@@ -231,42 +231,118 @@ async def get_clusters(
     request: Request,
     owner: str,
     repo: str,
+    force: bool = Query(False),
 ):
-    """Cluster open issues by topic using AI analysis."""
-    client = _get_ai_client(request)
+    """Cluster open issues by topic using AI analysis.
+
+    Returns cached clusters when available. Only sends unclustered
+    issues to the LLM. Use force=true to re-cluster everything.
+    """
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
 
-    # Get open issues with labels from raw_json
+    # Load all open issues with their cached cluster assignment
     cursor = await db.db.execute(
-        "SELECT number, title, raw_json FROM issues WHERE repo_id = ? AND state = 'open'",
+        "SELECT number, title, cluster, raw_json"
+        " FROM issues WHERE repo_id = ? AND state = 'open'",
         (repo_id,),
     )
     rows = await cursor.fetchall()
 
-    issues_for_clustering = []
+    if not rows:
+        return {
+            "clusters": [], "total_issues": 0,
+            "issue_titles": {}, "from_cache": True,
+        }
+
+    title_map: dict[int, str] = {}
+    cached: dict[str, list[int]] = {}  # cluster_name -> [numbers]
+    unclustered: list[dict] = []
+
     for row in rows:
-        labels = []
-        if row["raw_json"]:
-            try:
-                raw = json.loads(row["raw_json"])
-                label_nodes = raw.get("labels", {}).get("nodes", [])
-                labels = [n.get("name", "") for n in label_nodes if n.get("name")]
-            except (json.JSONDecodeError, AttributeError):
-                pass
-        issues_for_clustering.append({
-            "number": row["number"],
-            "title": row["title"],
-            "labels": labels,
-        })
+        num = row["number"]
+        title_map[num] = row["title"]
+        labels = _extract_labels(row["raw_json"])
+        issue_dict = {
+            "number": num, "title": row["title"], "labels": labels,
+        }
 
-    if not issues_for_clustering:
-        return {"clusters": [], "total_issues": 0, "issue_titles": {}}
+        if not force and row["cluster"]:
+            cached.setdefault(row["cluster"], []).append(num)
+        else:
+            unclustered.append(issue_dict)
 
-    clusters = await cluster_issues(client, owner, repo, issues_for_clustering)
-    title_map = {i["number"]: i["title"] for i in issues_for_clustering}
+    # If everything is cached and we're not forcing, return cache
+    if not unclustered and not force:
+        clusters = [
+            {"name": name, "issues": nums, "summary": ""}
+            for name, nums in sorted(cached.items())
+        ]
+        return {
+            "clusters": clusters,
+            "total_issues": len(rows),
+            "issue_titles": title_map,
+            "from_cache": True,
+        }
+
+    # Need AI client for clustering
+    client = _get_ai_client(request)
+
+    if force:
+        # Re-cluster all issues from scratch
+        all_issues = [
+            {"number": r["number"], "title": r["title"],
+             "labels": _extract_labels(r["raw_json"])}
+            for r in rows
+        ]
+        clusters = await cluster_issues(
+            client, owner, repo, all_issues)
+    else:
+        # Cluster only new issues, providing existing cluster
+        # names as context so the LLM can reuse them
+        existing_names = list(cached.keys())
+        clusters = await cluster_issues(
+            client, owner, repo, unclustered,
+            existing_clusters=existing_names)
+        # Merge with cached clusters
+        merged: dict[str, list[int]] = dict(cached)
+        for c in clusters:
+            name = c["name"]
+            merged.setdefault(name, []).extend(c["issues"])
+        clusters = [
+            {"name": n, "issues": nums,
+             "summary": next(
+                 (c["summary"] for c in clusters
+                  if c["name"] == n), "")}
+            for n, nums in sorted(merged.items())
+        ]
+
+    # Persist cluster assignments back to DB
+    for c in clusters:
+        for num in c["issues"]:
+            await db.db.execute(
+                "UPDATE issues SET cluster = ?"
+                " WHERE repo_id = ? AND number = ?",
+                (c["name"], repo_id, num),
+            )
+    await db.db.commit()
+
     return {
         "clusters": clusters,
-        "total_issues": len(issues_for_clustering),
+        "total_issues": len(rows),
         "issue_titles": title_map,
+        "from_cache": False,
     }
+
+
+def _extract_labels(raw_json: str | None) -> list[str]:
+    """Extract label names from raw issue JSON."""
+    if not raw_json:
+        return []
+    try:
+        raw = json.loads(raw_json)
+        nodes = raw.get("labels", {}).get("nodes", [])
+        return [n.get("name", "") for n in nodes
+                if n.get("name")]
+    except (json.JSONDecodeError, AttributeError):
+        return []

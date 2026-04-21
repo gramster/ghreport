@@ -148,6 +148,7 @@ async def cluster_issues(
     owner: str,
     repo: str,
     issues: list[dict],
+    existing_clusters: list[str] | None = None,
 ) -> list[dict]:
     """Cluster open issues by topic using LLM analysis."""
     # Cap at ~150 issues to stay within context limits
@@ -156,14 +157,23 @@ async def cluster_issues(
         {"number": i["number"], "title": i["title"], "labels": i.get("labels", [])}
         for i in truncated
     ]
-    payload = {
+    payload: dict = {
         "repository": f"{owner}/{repo}",
         "total_open_issues": len(issues),
         "issues": items,
     }
+    system = _CLUSTER_SYSTEM
+    if existing_clusters:
+        payload["existing_cluster_names"] = existing_clusters
+        system += (
+            "\n\nEXISTING CLUSTERS: The repository already has these clusters: "
+            + ", ".join(existing_clusters)
+            + ". Assign issues to these existing clusters when they fit. "
+            "Create new clusters only when no existing cluster is appropriate."
+        )
     raw = await _chat(
         client,
-        _CLUSTER_SYSTEM,
+        system,
         json.dumps(payload, default=str),
     )
     try:

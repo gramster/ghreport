@@ -155,6 +155,13 @@ class Database:
             await self._db.execute(
                 "ALTER TABLE sync_log ADD COLUMN error_message TEXT"
             )
+        # Add cluster column to issues
+        cursor3 = await self._db.execute("PRAGMA table_info(issues)")
+        issue_cols = {row[1] for row in await cursor3.fetchall()}
+        if "cluster" not in issue_cols:
+            await self._db.execute(
+                "ALTER TABLE issues ADD COLUMN cluster TEXT"
+            )
 
     async def _seed_defaults(self):
         """Seed default common team members on first database creation."""
