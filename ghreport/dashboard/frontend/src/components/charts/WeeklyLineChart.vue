@@ -45,6 +45,7 @@ const chartConfig = computed(() => {
       tension: 0.3,
       spanGaps: true,
       pointRadius: 2,
+      borderWidth: 2,
     }
   })
 
@@ -53,8 +54,22 @@ const chartConfig = computed(() => {
 
 const options = computed(() => ({
   responsive: true,
+  maintainAspectRatio: true,
   interaction: { mode: 'index' as const, intersect: false },
-  plugins: { legend: { display: true, position: 'top' as const } },
+  plugins: {
+    legend: {
+      display: true,
+      position: 'bottom' as const,
+      labels: {
+        boxWidth: 12,
+        boxHeight: 12,
+        padding: 12,
+        font: { size: 11 },
+        usePointStyle: true,
+        pointStyle: 'rectRounded',
+      },
+    },
+  },
   scales: {
     x: { ticks: { maxTicksLimit: 20 } },
     y: {
