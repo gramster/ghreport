@@ -129,6 +129,12 @@ th.sortable:hover { background: #ebedf0; }
 .stat { font-size: 2rem; font-weight: 700; }
 .stat-label { font-size: 0.85rem; color: #586069; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+.chart-grid-wide { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1rem; }
+.chart-grid-narrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1rem; }
+@media (max-width: 900px) {
+  .chart-grid-wide { grid-template-columns: 1fr; }
+  .chart-grid-narrow { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+}
 .tabs { display: flex; gap: 0; border-bottom: 2px solid #e1e4e8; margin-bottom: 1rem; }
 .tabs a { padding: 0.5rem 1rem; text-decoration: none; color: #586069; border-bottom: 2px solid transparent; margin-bottom: -2px; }
 .tabs a.router-link-active, .tabs a:hover { color: #24292e; border-bottom-color: #f9826c; }

@@ -26,10 +26,12 @@
 
       <template v-if="summary && summary.repos.length >= 1">
         <h3 style="margin-top: 1.5rem;">Aggregate Charts</h3>
-        <div class="grid">
-          <ChartCard title="Open Issues" :aggregate="true" chart-type="open-issues" />
+        <div class="chart-grid-wide">
           <ChartCard title="Response Times (median days/week)" :aggregate="true" chart-type="time-to-combined" y-label="Days" />
           <ChartCard title="Weekly Activity Counts" :aggregate="true" chart-type="activity-counts" y-label="Count" />
+        </div>
+        <div class="chart-grid-narrow">
+          <ChartCard title="Open Issues" :aggregate="true" chart-type="open-issues" />
           <ChartCard title="Label Frequency" :aggregate="true" chart-type="label-frequency" />
           <ChartCard title="Top Terms" :aggregate="true" chart-type="top-terms" />
         </div>
