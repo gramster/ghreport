@@ -1,5 +1,7 @@
 <template>
-  <Line :data="chartConfig" :options="options" />
+  <div style="position: relative; height: 260px;">
+    <Line :data="chartConfig" :options="options" />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -44,17 +46,34 @@ const chartConfig = computed(() => {
       backgroundColor: cfg?.color || color.bg,
       tension: 0.3,
       spanGaps: true,
-      pointRadius: 2,
-      borderWidth: 2,
+      pointRadius: 1.5,
+      borderWidth: 1.5,
+      fill: false,
     }
   })
 
   return { labels: weeks, datasets }
 })
 
+const yMax = computed(() => {
+  const seriesKeys = props.seriesConfig
+    ? props.seriesConfig.map(s => s.key)
+    : Object.keys(props.data).filter(k => k !== 'weeks')
+  let max = 0
+  for (const key of seriesKeys) {
+    const vals = props.data[key] as (number | null)[]
+    if (!vals) continue
+    for (const v of vals) {
+      if (v != null && v > max) max = v
+    }
+  }
+  // Ensure the axis always has some headroom and never collapses to 0
+  return Math.max(max * 1.15, 5)
+})
+
 const options = computed(() => ({
   responsive: true,
-  maintainAspectRatio: true,
+  maintainAspectRatio: false,
   interaction: { mode: 'index' as const, intersect: false },
   plugins: {
     legend: {
@@ -71,10 +90,14 @@ const options = computed(() => ({
     },
   },
   scales: {
-    x: { ticks: { maxTicksLimit: 20 } },
+    x: {
+      ticks: { maxTicksLimit: 20, font: { size: 10 } },
+    },
     y: {
       beginAtZero: true,
+      suggestedMax: yMax.value,
       title: { display: true, text: props.yLabel || '' },
+      ticks: { precision: 0 },
     },
   },
 }))
