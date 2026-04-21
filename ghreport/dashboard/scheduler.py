@@ -55,7 +55,8 @@ class SyncScheduler:
         """Return True if rate-limited (should skip)."""
         cooldown = get_rate_limit_until()
         if cooldown:
-            remaining = (cooldown - datetime.now()).total_seconds()
+            from datetime import timezone
+            remaining = (cooldown - datetime.now(timezone.utc)).total_seconds()
             if remaining > 0:
                 logger.warning("Rate-limited for %.0fs, skipping", remaining)
                 return True
@@ -186,7 +187,7 @@ class SyncScheduler:
     @property
     def rate_limited_until(self) -> str | None:
         rl = get_rate_limit_until()
-        return rl.isoformat() + "Z" if rl else None
+        return rl.isoformat() if rl else None
 
     @property
     def recent_errors(self) -> list[dict]:
