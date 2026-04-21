@@ -96,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import axios from 'axios'
 import { useDateRangeStore } from '@/stores/dateRange'
 
