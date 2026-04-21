@@ -215,3 +215,162 @@ def _summarize_monthly(months: dict) -> dict:
             "p90": round(vals[int(n * 0.9)] if n >= 5 else vals[-1], 1),
         }
     return summary
+
+
+# ---------------------------------------------------------------------------
+# 4. Data chat — natural-language queries over the DB
+# ---------------------------------------------------------------------------
+
+_CHAT_SYSTEM = """\
+You are a data analyst assistant for a GitHub repository dashboard.
+You answer questions about issues, pull requests, team activity, and
+trends by writing SQLite queries against the database described below.
+
+TODAY: {today}
+DATA RANGE: {data_range}
+
+DATABASE SCHEMA:
+{schema}
+
+RULES:
+1. When you need data to answer, output EXACTLY one JSON object:
+   {{"sql": "SELECT ..."}}
+   Output ONLY that JSON — no markdown fences, no commentary.
+2. Only SELECT statements are allowed. Never write INSERT/UPDATE/DELETE/DROP.
+3. Keep queries concise. LIMIT results to 200 rows max.
+4. After receiving query results, provide a clear, concise analysis
+   in plain markdown. Use bullet points or short tables where helpful.
+5. If you can answer without a query (e.g. clarification), just respond
+   in plain text — no JSON.
+6. If you need multiple queries, do them one at a time. After each
+   result set you can issue another {{"sql": "..."}} or give the
+   final answer.
+7. Use the repos table to resolve owner/name to repo_id when needed.
+8. Date columns are ISO-8601 text (e.g. '2025-01-15T10:30:00Z').
+   Use date/time functions accordingly.
+"""
+
+
+async def chat_with_data(
+    client,
+    db_conn,
+    schema_ddl: str,
+    message: str,
+    history: list[dict],
+    data_range: str = "",
+) -> dict:
+    """Multi-round chat: LLM can issue SQL queries, we execute and feed back.
+
+    Returns {"answer": str, "steps": [{"sql": str, "rows": list}...]}.
+    """
+    from datetime import date
+    from copilot.session import PermissionHandler
+
+    system = _CHAT_SYSTEM.format(
+        today=date.today().isoformat(),
+        data_range=data_range or "all available data",
+        schema=schema_ddl,
+    )
+
+    steps: list[dict] = []
+    max_rounds = 4
+
+    # Build conversation so far
+    messages = []
+    for h in history[-10:]:  # keep last 10 turns
+        messages.append(h)
+    messages.append({"role": "user", "content": message})
+
+    for _round in range(max_rounds):
+        # Flatten messages into a single user prompt for _chat
+        # (system is passed separately)
+        user_text = "\n\n".join(
+            f"[{m['role'].upper()}]: {m['content']}"
+            for m in messages
+        )
+        raw = await _chat(client, system, user_text)
+
+        # Check if the response is a SQL query request
+        sql = _extract_sql(raw)
+        if sql is None:
+            # Final answer — no more queries needed
+            return {"answer": raw, "steps": steps}
+
+        # Validate: only SELECT allowed
+        normalized = sql.strip().upper()
+        if not normalized.startswith("SELECT"):
+            return {
+                "answer": "I can only run SELECT queries.",
+                "steps": steps,
+            }
+
+        # Execute the query read-only
+        try:
+            cursor = await db_conn.execute(sql)
+            cols = [d[0] for d in cursor.description] \
+                if cursor.description else []
+            rows = [dict(zip(cols, r))
+                    for r in await cursor.fetchall()]
+            # Cap row count sent back to LLM
+            truncated = len(rows) > 200
+            rows = rows[:200]
+        except Exception as exc:
+            error_msg = str(exc)
+            steps.append({"sql": sql, "error": error_msg})
+            messages.append({"role": "assistant", "content": raw})
+            messages.append({
+                "role": "user",
+                "content": f"SQL error: {error_msg}. "
+                           "Please fix the query.",
+            })
+            continue
+
+        step = {"sql": sql, "row_count": len(rows),
+                "rows": rows[:50]}  # store first 50 in response
+        if truncated:
+            step["truncated"] = True
+        steps.append(step)
+
+        # Feed results back as next user message
+        result_text = json.dumps(
+            {"columns": cols, "row_count": len(rows),
+             "rows": rows}, default=str)
+        messages.append({"role": "assistant", "content": raw})
+        messages.append({
+            "role": "user",
+            "content": f"Query results ({len(rows)} rows"
+                       f"{', truncated' if truncated else ''}):"
+                       f"\n{result_text}\n\n"
+                       "Now provide your analysis, or issue "
+                       "another query if needed.",
+        })
+
+    # Ran out of rounds — return what we have
+    return {
+        "answer": "I wasn't able to complete the analysis "
+                  "within the allowed number of query rounds.",
+        "steps": steps,
+    }
+
+
+def _extract_sql(text: str) -> str | None:
+    """Extract a SQL query from LLM output if present."""
+    stripped = text.strip()
+    # Try JSON parse first
+    try:
+        obj = json.loads(stripped)
+        if isinstance(obj, dict) and "sql" in obj:
+            return obj["sql"]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    # Try finding JSON embedded in text
+    start = stripped.find('{"sql"')
+    if start >= 0:
+        end = stripped.find("}", start)
+        if end >= 0:
+            try:
+                obj = json.loads(stripped[start:end + 1])
+                return obj.get("sql")
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return None

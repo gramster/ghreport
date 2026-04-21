@@ -4,6 +4,7 @@
       <router-link to="/" class="brand">ghreport</router-link>
       <router-link to="/repos" class="nav-link">Repos</router-link>
       <router-link to="/team" class="nav-link">Team</router-link>
+      <router-link to="/chat" class="nav-link">Chat</router-link>
       <div class="nav-dates">
         <label>Since <input type="date" v-model="dateRange.since" /></label>
         <label>Until <input type="date" v-model="dateRange.until" /></label>
