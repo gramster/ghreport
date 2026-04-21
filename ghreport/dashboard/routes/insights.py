@@ -261,7 +261,12 @@ async def get_clusters(
         })
 
     if not issues_for_clustering:
-        return {"clusters": [], "total_issues": 0}
+        return {"clusters": [], "total_issues": 0, "issue_titles": {}}
 
     clusters = await cluster_issues(client, owner, repo, issues_for_clustering)
-    return {"clusters": clusters, "total_issues": len(issues_for_clustering)}
+    title_map = {i["number"]: i["title"] for i in issues_for_clustering}
+    return {
+        "clusters": clusters,
+        "total_issues": len(issues_for_clustering),
+        "issue_titles": title_map,
+    }

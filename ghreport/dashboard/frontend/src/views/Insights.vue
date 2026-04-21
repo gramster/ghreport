@@ -73,11 +73,16 @@
               <span class="cluster-count">{{ cluster.issues.length }} issues</span>
             </div>
             <p class="cluster-summary">{{ cluster.summary }}</p>
-            <div class="cluster-issues">
-              <a v-for="num in cluster.issues" :key="num"
-                 :href="`https://github.com/${owner}/${repo}/issues/${num}`"
-                 target="_blank" class="issue-chip">#{{ num }}</a>
-            </div>
+            <details class="cluster-details">
+              <summary>Show issues</summary>
+              <ul class="cluster-issue-list">
+                <li v-for="num in cluster.issues" :key="num">
+                  <a :href="`https://github.com/${owner}/${repo}/issues/${num}`"
+                     target="_blank">#{{ num }}</a>
+                  <span class="issue-title">{{ issueTitles[num] || '' }}</span>
+                </li>
+              </ul>
+            </details>
           </div>
         </template>
         <p v-else-if="clusters && clusters.length === 0" class="hint-text">No open issues to cluster.</p>
@@ -98,6 +103,8 @@ interface Cluster {
   issues: number[]
   summary: string
 }
+
+type IssueTitleMap = Record<number, string>
 
 const props = defineProps<{ owner: string; repo: string }>()
 const dateRange = useDateRangeStore()
@@ -123,6 +130,7 @@ const anomalyDays = computed(() => {
 
 // Clusters state
 const clusters = ref<Cluster[] | null>(null)
+const issueTitles = ref<IssueTitleMap>({})
 const totalIssues = ref(0)
 const clustersLoading = ref(false)
 const clustersError = ref('')
@@ -174,6 +182,7 @@ async function loadClusters() {
   try {
     const { data } = await axios.get(`/api/repos/${props.owner}/${props.repo}/insights/clusters`)
     clusters.value = data.clusters
+    issueTitles.value = data.issue_titles || {}
     totalIssues.value = data.total_issues
   } catch (e: any) {
     clustersError.value = e.response?.data?.detail || 'Failed to cluster issues'
@@ -251,21 +260,38 @@ async function loadClusters() {
   font-size: 0.9rem;
   margin: 0.25rem 0 0.5rem;
 }
-.cluster-issues {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
+.cluster-details {
+  margin-top: 0.4rem;
 }
-.issue-chip {
-  display: inline-block;
-  font-size: 0.8rem;
+.cluster-details summary {
+  cursor: pointer;
+  font-size: 0.85rem;
   color: #0366d6;
-  background: #f1f8ff;
-  padding: 0.15rem 0.5rem;
-  border-radius: 10px;
-  text-decoration: none;
+  user-select: none;
 }
-.issue-chip:hover {
-  background: #dbedff;
+.cluster-details summary:hover {
+  text-decoration: underline;
+}
+.cluster-issue-list {
+  list-style: none;
+  padding-left: 0.25rem;
+  margin: 0.4rem 0 0;
+}
+.cluster-issue-list li {
+  margin-bottom: 0.3rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+.cluster-issue-list a {
+  color: #0366d6;
+  text-decoration: none;
+  font-weight: 600;
+  margin-right: 0.4rem;
+}
+.cluster-issue-list a:hover {
+  text-decoration: underline;
+}
+.issue-title {
+  color: #24292e;
 }
 </style>
