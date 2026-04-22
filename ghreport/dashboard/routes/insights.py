@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/repos/{owner}/{repo}/insights", tags=["insights"])
 
+_SUBCLUSTER_THRESHOLD = 12
+_MAX_SUBCLUSTER_DEPTH = 6
+
 
 def _get_ai_client(request: Request):
     client = request.app.state.ai_client
@@ -46,6 +49,103 @@ async def _get_repo_id_or_404(request: Request, owner: str, repo: str) -> int:
     if not repo_id:
         raise HTTPException(404, f"Repository {owner}/{repo} not found")
     return repo_id
+
+
+def _normalize_subclusters(
+    subclusters: list[dict],
+    parent_issues: list[int],
+) -> list[dict]:
+    """Sanitize LLM sub-cluster output to valid issue subsets."""
+    parent_set = set(parent_issues)
+    assigned: set[int] = set()
+    cleaned: list[dict] = []
+
+    for idx, sub in enumerate(subclusters):
+        name = str(sub.get("name") or f"Subcluster {idx + 1}").strip()
+        summary = str(sub.get("summary") or "").strip()
+        raw_nums = sub.get("issues") or []
+        nums: list[int] = []
+
+        for n in raw_nums:
+            if not isinstance(n, int):
+                continue
+            if n not in parent_set or n in assigned:
+                continue
+            nums.append(n)
+            assigned.add(n)
+
+        if nums:
+            cleaned.append({"name": name, "issues": nums, "summary": summary})
+
+    # Preserve any dropped parent issues in a catch-all node.
+    missing = [n for n in parent_issues if n not in assigned]
+    if missing:
+        cleaned.append(
+            {
+                "name": "Other",
+                "issues": missing,
+                "summary": "Issues that did not fit a specific subcluster.",
+            }
+        )
+
+    return cleaned
+
+
+async def _subdivide_clusters_recursive(
+    client,
+    owner: str,
+    repo: str,
+    clusters: list[dict],
+    issue_lookup: dict[int, dict],
+    depth: int = 0,
+) -> list[dict]:
+    """Recursively sub-cluster groups while they remain large enough."""
+    if depth >= _MAX_SUBCLUSTER_DEPTH:
+        return clusters
+
+    result: list[dict] = []
+    for cluster in clusters:
+        nums = [n for n in cluster.get("issues", []) if isinstance(n, int)]
+        cluster["issues"] = nums
+
+        if len(nums) < _SUBCLUSTER_THRESHOLD:
+            result.append(cluster)
+            continue
+
+        issue_rows = [issue_lookup[n] for n in nums if n in issue_lookup]
+        if len(issue_rows) < _SUBCLUSTER_THRESHOLD:
+            result.append(cluster)
+            continue
+
+        subs = await sub_cluster_issues(
+            client,
+            owner,
+            repo,
+            cluster.get("name", "Cluster"),
+            issue_rows,
+        )
+        cleaned = _normalize_subclusters(subs, nums)
+
+        # Guard against no-op or degenerate splits.
+        if len(cleaned) <= 1:
+            result.append(cluster)
+            continue
+        largest = max(len(s["issues"]) for s in cleaned)
+        if largest >= len(nums):
+            result.append(cluster)
+            continue
+
+        cluster["subclusters"] = await _subdivide_clusters_recursive(
+            client,
+            owner,
+            repo,
+            cleaned,
+            issue_lookup,
+            depth + 1,
+        )
+        result.append(cluster)
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -317,27 +417,20 @@ async def get_clusters(
             for n, nums in sorted(merged.items())
         ]
 
-    # Sub-cluster any clusters with > 20 issues
-    _SUB_THRESHOLD = 20
+    # Recursively sub-cluster large groups
     issue_lookup: dict[int, dict] = {}
     for row in rows:
         issue_lookup[row["number"]] = {
             "number": row["number"], "title": row["title"],
             "labels": _extract_labels(row["raw_json"]),
         }
-    final_clusters = []
-    for c in clusters:
-        if len(c.get("issues", [])) > _SUB_THRESHOLD:
-            sub_issues = [
-                issue_lookup[n] for n in c["issues"]
-                if n in issue_lookup
-            ]
-            subs = await sub_cluster_issues(
-                client, owner, repo, c["name"], sub_issues)
-            if subs:
-                c["subclusters"] = subs
-        final_clusters.append(c)
-    clusters = final_clusters
+    clusters = await _subdivide_clusters_recursive(
+        client,
+        owner,
+        repo,
+        clusters,
+        issue_lookup,
+    )
 
     # Persist cluster assignments back to DB
     for c in clusters:

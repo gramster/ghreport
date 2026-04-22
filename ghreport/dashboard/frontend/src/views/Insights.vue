@@ -67,42 +67,15 @@
         </div>
         <template v-else-if="clusters && clusters.length > 0">
           <p class="hint-text" style="margin-bottom: 0.75rem;">{{ totalIssues }} open issues grouped into {{ clusters.length }} clusters<span v-if="fromCache"> (cached)</span></p>
-          <div v-for="(cluster, idx) in clusters" :key="idx" class="cluster-card">
-            <div class="cluster-header">
-              <strong>{{ cluster.name }}</strong>
-              <span class="cluster-count">{{ cluster.issues.length }} issues</span>
-            </div>
-            <p class="cluster-summary">{{ cluster.summary }}</p>
-            <template v-if="cluster.subclusters && cluster.subclusters.length">
-              <div v-for="(sub, si) in cluster.subclusters" :key="si" class="subcluster-card">
-                <div class="subcluster-header">
-                  <span class="subcluster-name">{{ sub.name }}</span>
-                  <span class="cluster-count">{{ sub.issues.length }}</span>
-                </div>
-                <p v-if="sub.summary" class="cluster-summary" style="margin-top:0.1rem;">{{ sub.summary }}</p>
-                <details class="cluster-details">
-                  <summary>Show issues</summary>
-                  <ul class="cluster-issue-list">
-                    <li v-for="num in sub.issues" :key="num">
-                      <a :href="`https://github.com/${owner}/${repo}/issues/${num}`"
-                         target="_blank">#{{ num }}</a>
-                      <span class="issue-title">{{ issueTitles[num] || '' }}</span>
-                    </li>
-                  </ul>
-                </details>
-              </div>
-            </template>
-            <details v-else class="cluster-details">
-              <summary>Show issues</summary>
-              <ul class="cluster-issue-list">
-                <li v-for="num in cluster.issues" :key="num">
-                  <a :href="`https://github.com/${owner}/${repo}/issues/${num}`"
-                     target="_blank">#{{ num }}</a>
-                  <span class="issue-title">{{ issueTitles[num] || '' }}</span>
-                </li>
-              </ul>
-            </details>
-          </div>
+          <ClusterNode
+            v-for="(cluster, idx) in clusters"
+            :key="idx"
+            :cluster="cluster"
+            :owner="owner"
+            :repo="repo"
+            :issue-titles="issueTitles"
+            :level="0"
+          />
         </template>
         <p v-else-if="clusters && clusters.length === 0" class="hint-text">No open issues to cluster.</p>
         <p v-else-if="clustersError" class="error-text">{{ clustersError }}</p>
@@ -118,18 +91,13 @@
 import { ref, computed } from 'vue'
 import axios from 'axios'
 import { useDateRangeStore } from '@/stores/dateRange'
-
-interface SubCluster {
-  name: string
-  issues: number[]
-  summary: string
-}
+import ClusterNode from '@/components/ClusterNode.vue'
 
 interface Cluster {
   name: string
   issues: number[]
   summary: string
-  subclusters?: SubCluster[]
+  subclusters?: Cluster[]
 }
 
 type IssueTitleMap = Record<number, string>
@@ -274,80 +242,5 @@ function switchToClusters() {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
-}
-.cluster-card {
-  border: 1px solid #e1e4e8;
-  border-radius: 6px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 0.75rem;
-}
-.cluster-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.3rem;
-}
-.cluster-count {
-  font-size: 0.8rem;
-  color: #586069;
-  background: #f1f3f5;
-  padding: 0.15rem 0.5rem;
-  border-radius: 10px;
-}
-.cluster-summary {
-  color: #586069;
-  font-size: 0.9rem;
-  margin: 0.25rem 0 0.5rem;
-}
-.cluster-details {
-  margin-top: 0.4rem;
-}
-.cluster-details summary {
-  cursor: pointer;
-  font-size: 0.85rem;
-  color: #0366d6;
-  user-select: none;
-}
-.cluster-details summary:hover {
-  text-decoration: underline;
-}
-.cluster-issue-list {
-  list-style: none;
-  padding-left: 0.25rem;
-  margin: 0.4rem 0 0;
-}
-.cluster-issue-list li {
-  margin-bottom: 0.3rem;
-  font-size: 0.85rem;
-  line-height: 1.4;
-}
-.cluster-issue-list a {
-  color: #0366d6;
-  text-decoration: none;
-  font-weight: 600;
-  margin-right: 0.4rem;
-}
-.cluster-issue-list a:hover {
-  text-decoration: underline;
-}
-.issue-title {
-  color: #24292e;
-}
-.subcluster-card {
-  border: 1px solid #eaeef2;
-  border-radius: 5px;
-  padding: 0.5rem 0.75rem;
-  margin: 0.4rem 0 0.4rem 0.75rem;
-  background: #f9fafb;
-}
-.subcluster-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.15rem;
-}
-.subcluster-name {
-  font-weight: 600;
-  font-size: 0.88rem;
 }
 </style>
