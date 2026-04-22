@@ -91,6 +91,25 @@ def _normalize_subclusters(
     return cleaned
 
 
+def _fallback_partition(parent_issues: list[int]) -> list[dict]:
+    """Deterministically split a large group when LLM split is a no-op."""
+    size = _SUBCLUSTER_THRESHOLD - 1
+    parts: list[dict] = []
+    for idx in range(0, len(parent_issues), size):
+        chunk = parent_issues[idx:idx + size]
+        if not chunk:
+            continue
+        part_no = (idx // size) + 1
+        parts.append(
+            {
+                "name": f"Part {part_no}",
+                "issues": chunk,
+                "summary": "Fallback split for large cluster.",
+            }
+        )
+    return parts
+
+
 async def _subdivide_clusters_recursive(
     client,
     owner: str,
@@ -128,12 +147,18 @@ async def _subdivide_clusters_recursive(
 
         # Guard against no-op or degenerate splits.
         if len(cleaned) <= 1:
-            result.append(cluster)
-            continue
+            # Force progress when model fails to split a large cluster.
+            cleaned = _fallback_partition(nums)
+            if len(cleaned) <= 1:
+                result.append(cluster)
+                continue
         largest = max(len(s["issues"]) for s in cleaned)
         if largest >= len(nums):
-            result.append(cluster)
-            continue
+            cleaned = _fallback_partition(nums)
+            largest = max(len(s["issues"]) for s in cleaned)
+            if largest >= len(nums):
+                result.append(cluster)
+                continue
 
         cluster["subclusters"] = await _subdivide_clusters_recursive(
             client,
@@ -372,12 +397,41 @@ async def get_clusters(
         else:
             unclustered.append(issue_dict)
 
-    # If everything is cached and we're not forcing, return cache
+    # Build issue lookup for recursive sub-clustering
+    issue_lookup: dict[int, dict] = {}
+    for row in rows:
+        issue_lookup[row["number"]] = {
+            "number": row["number"],
+            "title": row["title"],
+            "labels": _extract_labels(row["raw_json"]),
+        }
+
+    # If everything is cached and we're not forcing, still recursively
+    # subdivide large clusters so leaf groups stay below threshold.
     if not unclustered and not force:
         clusters = [
             {"name": name, "issues": nums, "summary": ""}
             for name, nums in sorted(cached.items())
         ]
+        needs_subdivision = any(
+            len(c.get("issues", [])) >= _SUBCLUSTER_THRESHOLD
+            for c in clusters
+        )
+        if needs_subdivision:
+            client = _get_ai_client(request)
+            clusters = await _subdivide_clusters_recursive(
+                client,
+                owner,
+                repo,
+                clusters,
+                issue_lookup,
+            )
+            return {
+                "clusters": clusters,
+                "total_issues": len(rows),
+                "issue_titles": title_map,
+                "from_cache": False,
+            }
         return {
             "clusters": clusters,
             "total_issues": len(rows),
@@ -418,12 +472,6 @@ async def get_clusters(
         ]
 
     # Recursively sub-cluster large groups
-    issue_lookup: dict[int, dict] = {}
-    for row in rows:
-        issue_lookup[row["number"]] = {
-            "number": row["number"], "title": row["title"],
-            "labels": _extract_labels(row["raw_json"]),
-        }
     clusters = await _subdivide_clusters_recursive(
         client,
         owner,
