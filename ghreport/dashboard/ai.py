@@ -184,6 +184,51 @@ async def cluster_issues(
         return [{"name": "Parse error", "issues": [], "summary": raw[:500]}]
 
 
+_SUBCLUSTER_SYSTEM = """\
+You are an issue triage specialist. You are given a cluster of GitHub
+issues that share a broad theme. Split them into 2-5 more specific
+sub-groups. For each sub-group provide:
+- A short descriptive name
+- The issue numbers in that sub-group
+- A one-sentence summary
+
+Output valid JSON: {"clusters": [{"name": "...", "issues": [1,2,3], "summary": "..."}]}
+Only output the JSON, no markdown fences or commentary."""
+
+
+async def sub_cluster_issues(
+    client,
+    owner: str,
+    repo: str,
+    parent_name: str,
+    issues: list[dict],
+) -> list[dict]:
+    """Split a large cluster into sub-clusters."""
+    items = [
+        {"number": i["number"], "title": i["title"],
+         "labels": i.get("labels", [])}
+        for i in issues[:150]
+    ]
+    payload = {
+        "repository": f"{owner}/{repo}",
+        "parent_cluster": parent_name,
+        "issue_count": len(issues),
+        "issues": items,
+    }
+    raw = await _chat(
+        client,
+        _SUBCLUSTER_SYSTEM,
+        json.dumps(payload, default=str),
+    )
+    try:
+        parsed = json.loads(raw)
+        return parsed.get("clusters", [])
+    except json.JSONDecodeError:
+        logger.warning(
+            "Failed to parse sub-cluster JSON: %s", raw[:200])
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

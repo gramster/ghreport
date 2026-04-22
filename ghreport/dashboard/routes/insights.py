@@ -18,7 +18,7 @@ from ...core.analyzer import (
     time_to_first_response_data,
     time_to_merge_data,
 )
-from ..ai import cluster_issues, detect_anomalies, generate_digest
+from ..ai import cluster_issues, detect_anomalies, generate_digest, sub_cluster_issues
 from ..cache import (
     enrich_team_response,
     filter_active_issues,
@@ -316,6 +316,28 @@ async def get_clusters(
                   if c["name"] == n), "")}
             for n, nums in sorted(merged.items())
         ]
+
+    # Sub-cluster any clusters with > 20 issues
+    _SUB_THRESHOLD = 20
+    issue_lookup: dict[int, dict] = {}
+    for row in rows:
+        issue_lookup[row["number"]] = {
+            "number": row["number"], "title": row["title"],
+            "labels": _extract_labels(row["raw_json"]),
+        }
+    final_clusters = []
+    for c in clusters:
+        if len(c.get("issues", [])) > _SUB_THRESHOLD:
+            sub_issues = [
+                issue_lookup[n] for n in c["issues"]
+                if n in issue_lookup
+            ]
+            subs = await sub_cluster_issues(
+                client, owner, repo, c["name"], sub_issues)
+            if subs:
+                c["subclusters"] = subs
+        final_clusters.append(c)
+    clusters = final_clusters
 
     # Persist cluster assignments back to DB
     for c in clusters:

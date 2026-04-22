@@ -73,7 +73,26 @@
               <span class="cluster-count">{{ cluster.issues.length }} issues</span>
             </div>
             <p class="cluster-summary">{{ cluster.summary }}</p>
-            <details class="cluster-details">
+            <template v-if="cluster.subclusters && cluster.subclusters.length">
+              <div v-for="(sub, si) in cluster.subclusters" :key="si" class="subcluster-card">
+                <div class="subcluster-header">
+                  <span class="subcluster-name">{{ sub.name }}</span>
+                  <span class="cluster-count">{{ sub.issues.length }}</span>
+                </div>
+                <p v-if="sub.summary" class="cluster-summary" style="margin-top:0.1rem;">{{ sub.summary }}</p>
+                <details class="cluster-details">
+                  <summary>Show issues</summary>
+                  <ul class="cluster-issue-list">
+                    <li v-for="num in sub.issues" :key="num">
+                      <a :href="`https://github.com/${owner}/${repo}/issues/${num}`"
+                         target="_blank">#{{ num }}</a>
+                      <span class="issue-title">{{ issueTitles[num] || '' }}</span>
+                    </li>
+                  </ul>
+                </details>
+              </div>
+            </template>
+            <details v-else class="cluster-details">
               <summary>Show issues</summary>
               <ul class="cluster-issue-list">
                 <li v-for="num in cluster.issues" :key="num">
@@ -100,10 +119,17 @@ import { ref, computed } from 'vue'
 import axios from 'axios'
 import { useDateRangeStore } from '@/stores/dateRange'
 
+interface SubCluster {
+  name: string
+  issues: number[]
+  summary: string
+}
+
 interface Cluster {
   name: string
   issues: number[]
   summary: string
+  subclusters?: SubCluster[]
 }
 
 type IssueTitleMap = Record<number, string>
@@ -306,5 +332,22 @@ function switchToClusters() {
 }
 .issue-title {
   color: #24292e;
+}
+.subcluster-card {
+  border: 1px solid #eaeef2;
+  border-radius: 5px;
+  padding: 0.5rem 0.75rem;
+  margin: 0.4rem 0 0.4rem 0.75rem;
+  background: #f9fafb;
+}
+.subcluster-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.15rem;
+}
+.subcluster-name {
+  font-weight: 600;
+  font-size: 0.88rem;
 }
 </style>
