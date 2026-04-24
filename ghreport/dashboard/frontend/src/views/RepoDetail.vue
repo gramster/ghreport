@@ -43,19 +43,32 @@
         </div>
       </div>
 
+      <div v-if="loadingSummary" class="activity-summary">
+        <span class="summary-loading">Generating activity summary…</span>
+      </div>
+      <div v-else-if="activitySummary" class="activity-summary">
+        <span class="summary-label">Last {{ summaryPeriodDays }} days</span>
+        {{ activitySummary }}
+      </div>
+      <div v-else-if="summaryError" class="activity-summary summary-error">
+        Activity summary unavailable.
+      </div>
+
       <h3 style="margin-top: 1rem;">Charts</h3>
       <div class="chart-grid-wide">
         <ChartCard :key="'time-to-combined-'+syncVersion" title="Response Times (median days/week)" :owner="owner" :repo="repo" chart-type="time-to-combined" y-label="Days" />
         <ChartCard :key="'activity-counts-'+syncVersion" title="Weekly Activity Counts" :owner="owner" :repo="repo" chart-type="activity-counts" y-label="Count" />
       </div>
-      <div class="chart-grid-narrow">
-        <ChartCard :key="'open-issues-'+syncVersion" title="Open Issues" :owner="owner" :repo="repo" chart-type="open-issues" />
-        <ChartCard :key="'label-frequency-'+syncVersion" title="Label Frequency" :owner="owner" :repo="repo" chart-type="label-frequency" />
-        <ChartCard :key="'top-terms-'+syncVersion" title="Top Terms" :owner="owner" :repo="repo" chart-type="top-terms" />
-      </div>
-      <div class="chart-grid-narrow">
-        <ChartCard :key="'files-changed-'+syncVersion" title="Files Changed/PR" :owner="owner" :repo="repo" chart-type="files-changed" y-label="Files" />
-        <ChartCard :key="'lines-changed-'+syncVersion" title="Lines Changed/PR" :owner="owner" :repo="repo" chart-type="lines-changed" y-label="Lines" />
+      <div class="chart-cols">
+        <div class="chart-col-left">
+          <ChartCard :key="'open-issues-'+syncVersion" title="Open Issues" :owner="owner" :repo="repo" chart-type="open-issues" />
+          <ChartCard :key="'label-frequency-'+syncVersion" title="Label Frequency" :owner="owner" :repo="repo" chart-type="label-frequency" />
+          <ChartCard :key="'files-changed-'+syncVersion" title="Files Changed/PR" :owner="owner" :repo="repo" chart-type="files-changed" y-label="Files" />
+          <ChartCard :key="'lines-changed-'+syncVersion" title="Lines Changed/PR" :owner="owner" :repo="repo" chart-type="lines-changed" y-label="Lines" />
+        </div>
+        <div class="chart-col-right">
+          <ChartCard :key="'top-terms-'+syncVersion" title="Top Terms" :owner="owner" :repo="repo" chart-type="top-terms" />
+        </div>
       </div>
     </template>
   </div>
@@ -87,6 +100,10 @@ const repoInfo = ref<RepoInfo | null>(null)
 const loading = ref(true)
 const syncing = ref(false)
 const syncVersion = ref(0)
+const activitySummary = ref<string | null>(null)
+const summaryPeriodDays = ref<number>(14)
+const loadingSummary = ref(false)
+const summaryError = ref(false)
 
 const syncError = computed(() => {
   const key = `${props.owner}/${props.repo}`
@@ -111,6 +128,23 @@ async function load() {
   }
 }
 
+async function loadSummary() {
+  loadingSummary.value = true
+  activitySummary.value = null
+  summaryError.value = false
+  try {
+    const { data } = await axios.get(
+      `/api/repos/${props.owner}/${props.repo}/insights/activity-summary`
+    )
+    activitySummary.value = data.summary || null
+    summaryPeriodDays.value = data.period_days ?? 14
+  } catch {
+    summaryError.value = true
+  } finally {
+    loadingSummary.value = false
+  }
+}
+
 async function triggerSync() {
   syncing.value = true
   try {
@@ -123,7 +157,8 @@ async function triggerSync() {
 }
 
 onMounted(load)
-watch(() => [props.owner, props.repo], load)
+onMounted(loadSummary)
+watch(() => [props.owner, props.repo], () => { load(); loadSummary() })
 watch(() => [dateRange.since, dateRange.until, dateRange.coverageVersion], load)
 </script>
 
@@ -155,5 +190,50 @@ watch(() => [dateRange.since, dateRange.until, dateRange.coverageVersion], load)
   font-size: 0.8rem;
   color: #cb2431;
   cursor: help;
+}
+.activity-summary {
+  background: #f6f8fa;
+  border: 1px solid #e1e4e8;
+  border-left: 3px solid #0366d6;
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #24292e;
+}
+.summary-loading {
+  color: #586069;
+  font-style: italic;
+}
+.summary-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #586069;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.35rem;
+}
+.summary-error {
+  color: #586069;
+  font-style: italic;
+  border-left-color: #e1e4e8;
+}
+.chart-cols {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+.chart-col-left {
+  flex: 2;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+.chart-col-right {
+  flex: 1;
 }
 </style>

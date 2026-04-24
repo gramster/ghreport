@@ -4,7 +4,7 @@
     <div v-if="loading" class="loading">Loading...</div>
     <div v-else-if="error" style="color: #cb2431;">{{ error }}</div>
     <template v-else>
-      <component :is="chartComponent" :data="chartData" :y-label="yLabel" v-if="chartData" />
+      <component :is="chartComponent" :data="chartData" :y-label="yLabel" :owner="props.owner" :repo="props.repo" v-if="chartData" />
     </template>
   </div>
 </template>

@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS repos (
     name TEXT NOT NULL,
     last_synced_at TEXT,
     data_since TEXT,
+    sync_start_at TEXT,
     config_json TEXT,
     UNIQUE(owner, name)
 );
@@ -135,6 +136,11 @@ class Database:
         await self._db.executescript(SCHEMA)
         # Migrations — add columns if missing
         await self._migrate()
+        # Clean up syncs that were left 'running' by a previous server instance.
+        await self._db.execute(
+            "UPDATE sync_log SET status = 'interrupted', completed_at = datetime('now')"
+            " WHERE status = 'running'"
+        )
         # Seed default common team members on first run
         if is_new:
             await self._seed_defaults()
@@ -147,6 +153,10 @@ class Database:
         if "data_since" not in cols:
             await self._db.execute(
                 "ALTER TABLE repos ADD COLUMN data_since TEXT"
+            )
+        if "sync_start_at" not in cols:
+            await self._db.execute(
+                "ALTER TABLE repos ADD COLUMN sync_start_at TEXT"
             )
         # Add error_message to sync_log
         cursor2 = await self._db.execute("PRAGMA table_info(sync_log)")
@@ -233,6 +243,13 @@ class Database:
     async def update_last_synced(self, repo_id: int, when: str):
         await self.db.execute(
             "UPDATE repos SET last_synced_at = ? WHERE id = ?", (when, repo_id)
+        )
+
+    async def update_sync_start(self, repo_id: int, sync_start_iso: str):
+        """Persist the start timestamp of a completed sync as covered_until."""
+        await self.db.execute(
+            "UPDATE repos SET sync_start_at = ? WHERE id = ?",
+            (sync_start_iso, repo_id),
         )
 
     async def update_data_since(self, repo_id: int, since_iso: str):

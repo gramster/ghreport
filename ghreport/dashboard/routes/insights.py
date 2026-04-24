@@ -8,6 +8,7 @@ import statistics
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import Response
 
 from ...core.analyzer import (
     closed_issues_data,
@@ -18,7 +19,7 @@ from ...core.analyzer import (
     time_to_first_response_data,
     time_to_merge_data,
 )
-from ..ai import cluster_issues, detect_anomalies, generate_digest, sub_cluster_issues
+from ..ai import cluster_issues, detect_anomalies, generate_digest, generate_repo_activity_summary, sub_cluster_issues
 from ..cache import (
     enrich_team_response,
     filter_active_issues,
@@ -35,6 +36,7 @@ router = APIRouter(prefix="/api/repos/{owner}/{repo}/insights", tags=["insights"
 
 _SUBCLUSTER_THRESHOLD = 12
 _MAX_SUBCLUSTER_DEPTH = 6
+_CLUSTER_TREE_CONFIG_KEY = "issue_cluster_tree"
 
 
 def _get_ai_client(request: Request):
@@ -49,6 +51,75 @@ async def _get_repo_id_or_404(request: Request, owner: str, repo: str) -> int:
     if not repo_id:
         raise HTTPException(404, f"Repository {owner}/{repo} not found")
     return repo_id
+
+
+def _collect_issue_numbers(clusters: list[dict]) -> set[int]:
+    """Collect issue numbers from a cluster tree recursively."""
+    numbers: set[int] = set()
+    for cluster in clusters:
+        for n in cluster.get("issues", []):
+            if isinstance(n, int):
+                numbers.add(n)
+        subs = cluster.get("subclusters") or []
+        if subs:
+            numbers.update(_collect_issue_numbers(subs))
+    return numbers
+
+
+def _filter_cluster_tree(clusters: list[dict], valid_issues: set[int]) -> list[dict]:
+    """Drop stale issue refs while preserving nested structure."""
+    filtered: list[dict] = []
+    for cluster in clusters:
+        nums = [n for n in cluster.get("issues", []) if isinstance(n, int) and n in valid_issues]
+        subs = _filter_cluster_tree(cluster.get("subclusters") or [], valid_issues)
+        if not nums and not subs:
+            continue
+        filtered.append(
+            {
+                "name": str(cluster.get("name") or "Cluster"),
+                "issues": nums,
+                "summary": str(cluster.get("summary") or ""),
+                **({"subclusters": subs} if subs else {}),
+            }
+        )
+    return filtered
+
+
+async def _load_cluster_tree_from_repo_config(db, repo_id: int) -> list[dict] | None:
+    """Load persisted cluster tree from repos.config_json."""
+    row = await (await db.db.execute(
+        "SELECT config_json FROM repos WHERE id = ?", (repo_id,)
+    )).fetchone()
+    if not row or not row["config_json"]:
+        return None
+    try:
+        cfg = json.loads(row["config_json"])
+    except (json.JSONDecodeError, TypeError):
+        return None
+    tree = cfg.get(_CLUSTER_TREE_CONFIG_KEY)
+    if isinstance(tree, list):
+        return tree
+    return None
+
+
+async def _save_cluster_tree_to_repo_config(db, repo_id: int, clusters: list[dict]):
+    """Persist full cluster tree in repos.config_json."""
+    row = await (await db.db.execute(
+        "SELECT config_json FROM repos WHERE id = ?", (repo_id,)
+    )).fetchone()
+    cfg: dict = {}
+    if row and row["config_json"]:
+        try:
+            loaded = json.loads(row["config_json"])
+            if isinstance(loaded, dict):
+                cfg = loaded
+        except (json.JSONDecodeError, TypeError):
+            cfg = {}
+    cfg[_CLUSTER_TREE_CONFIG_KEY] = clusters
+    await db.db.execute(
+        "UPDATE repos SET config_json = ? WHERE id = ?",
+        (json.dumps(cfg), repo_id),
+    )
 
 
 def _normalize_subclusters(
@@ -67,7 +138,9 @@ def _normalize_subclusters(
         nums: list[int] = []
 
         for n in raw_nums:
-            if not isinstance(n, int):
+            try:
+                n = int(n)
+            except (TypeError, ValueError):
                 continue
             if n not in parent_set or n in assigned:
                 continue
@@ -89,6 +162,17 @@ def _normalize_subclusters(
         )
 
     return cleaned
+
+
+def _has_fallback_subclusters(clusters: list[dict]) -> bool:
+    """Return True if any cluster contains fallback partition nodes (Part N)."""
+    import re
+    _fallback_re = re.compile(r"^Part \d+$")
+    for cluster in clusters:
+        for sub in cluster.get("subclusters", []):
+            if _fallback_re.match(sub.get("name", "")):
+                return True
+    return False
 
 
 def _fallback_partition(parent_issues: list[int]) -> list[dict]:
@@ -148,12 +232,24 @@ async def _subdivide_clusters_recursive(
         # Guard against no-op or degenerate splits.
         if len(cleaned) <= 1:
             # Force progress when model fails to split a large cluster.
+            logger.warning(
+                "sub_cluster_issues returned degenerate split for %r (%d issues); "
+                "raw subs=%r",
+                cluster.get("name"),
+                len(nums),
+                subs[:2] if subs else subs,
+            )
             cleaned = _fallback_partition(nums)
             if len(cleaned) <= 1:
                 result.append(cluster)
                 continue
         largest = max(len(s["issues"]) for s in cleaned)
         if largest >= len(nums):
+            logger.warning(
+                "sub_cluster_issues made no progress for %r (%d issues); falling back",
+                cluster.get("name"),
+                len(nums),
+            )
             cleaned = _fallback_partition(nums)
             largest = max(len(s["issues"]) for s in cleaned)
             if largest >= len(nums):
@@ -211,8 +307,12 @@ async def _collect_metrics(db, repo_id, owner, repo, since_dt, until_dt, days):
         await get_cached_prs(db, repo_id), since_dt, until_dt)
     prs_open = filter_active_prs(
         await get_cached_prs(db, repo_id, state="open"), since_dt, until_dt)
+    # "closed" for pr_activity_data means any non-open PR — must include
+    # merged PRs (state="merged") as well as unmerged closes (state="closed").
     prs_closed = filter_active_prs(
-        await get_cached_prs(db, repo_id, state="closed"), since_dt, until_dt)
+        await get_cached_prs(db, repo_id, state="closed") +
+        await get_cached_prs(db, repo_id, state="merged"),
+        since_dt, until_dt)
     members = await get_cached_team_members(db, repo_id)
     enrich_team_response(issues_open, members)
 
@@ -357,6 +457,7 @@ async def get_clusters(
     owner: str,
     repo: str,
     force: bool = Query(False),
+    ensure_subclusters: bool = Query(False),
 ):
     """Cluster open issues by topic using AI analysis.
 
@@ -406,32 +507,50 @@ async def get_clusters(
             "labels": _extract_labels(row["raw_json"]),
         }
 
-    # If everything is cached and we're not forcing, still recursively
-    # subdivide large clusters so leaf groups stay below threshold.
+    # If everything is cached and we're not forcing, return cached clusters
+    # directly. Do not re-cluster AI when all open issues are already tagged.
     if not unclustered and not force:
-        clusters = [
-            {"name": name, "issues": nums, "summary": ""}
-            for name, nums in sorted(cached.items())
-        ]
-        needs_subdivision = any(
-            len(c.get("issues", [])) >= _SUBCLUSTER_THRESHOLD
-            for c in clusters
-        )
-        if needs_subdivision:
+        # Prefer persisted nested tree when available.
+        persisted_tree = await _load_cluster_tree_from_repo_config(db, repo_id)
+        valid_issues = set(title_map.keys())
+        if persisted_tree and not _has_fallback_subclusters(persisted_tree):
+            filtered_tree = _filter_cluster_tree(persisted_tree, valid_issues)
+            if _collect_issue_numbers(filtered_tree) == valid_issues:
+                return {
+                    "clusters": filtered_tree,
+                    "total_issues": len(rows),
+                    "issue_titles": title_map,
+                    "from_cache": True,
+                }
+
+        # Legacy cache compatibility: if we only have top-level issue tags,
+        # optionally bootstrap/persist nested subclusters from those tags.
+        if ensure_subclusters and cached:
             client = _get_ai_client(request)
-            clusters = await _subdivide_clusters_recursive(
+            top_clusters = [
+                {"name": name, "issues": nums, "summary": ""}
+                for name, nums in sorted(cached.items())
+            ]
+            bootstrapped_tree = await _subdivide_clusters_recursive(
                 client,
                 owner,
                 repo,
-                clusters,
+                top_clusters,
                 issue_lookup,
             )
+            await _save_cluster_tree_to_repo_config(db, repo_id, bootstrapped_tree)
+            await db.db.commit()
             return {
-                "clusters": clusters,
+                "clusters": bootstrapped_tree,
                 "total_issues": len(rows),
                 "issue_titles": title_map,
                 "from_cache": False,
             }
+
+        clusters = [
+            {"name": name, "issues": nums, "summary": ""}
+            for name, nums in sorted(cached.items())
+        ]
         return {
             "clusters": clusters,
             "total_issues": len(rows),
@@ -488,6 +607,10 @@ async def get_clusters(
                 " WHERE repo_id = ? AND number = ?",
                 (c["name"], repo_id, num),
             )
+
+    # Persist full nested cluster tree for future cached responses/exports.
+    await _save_cluster_tree_to_repo_config(db, repo_id, clusters)
+
     await db.db.commit()
 
     return {
@@ -509,3 +632,168 @@ def _extract_labels(raw_json: str | None) -> list[str]:
                 if n.get("name")]
     except (json.JSONDecodeError, AttributeError):
         return []
+
+
+def _cluster_tree_to_markdown(
+    clusters: list[dict],
+    issue_titles: dict[int, str],
+    owner: str,
+    repo: str,
+    depth: int = 0,
+) -> list[str]:
+    lines: list[str] = []
+    for cluster in clusters:
+        indent = "  " * depth
+        name = str(cluster.get("name") or "Cluster")
+        issues = [n for n in cluster.get("issues", []) if isinstance(n, int)]
+        summary = str(cluster.get("summary") or "").strip()
+
+        lines.append(f"{indent}- **{name}** ({len(issues)} issues)")
+        if summary:
+            lines.append(f"{indent}  - {summary}")
+
+        subclusters = cluster.get("subclusters") or []
+        if subclusters:
+            lines.extend(
+                _cluster_tree_to_markdown(
+                    subclusters,
+                    issue_titles,
+                    owner,
+                    repo,
+                    depth + 1,
+                )
+            )
+            continue
+
+        for num in issues:
+            title = issue_titles.get(num, "")
+            issue_url = f"https://github.com/{owner}/{repo}/issues/{num}"
+            title_part = f" - {title}" if title else ""
+            lines.append(f"{indent}  - [#{num}]({issue_url}){title_part}")
+
+    return lines
+
+
+@router.get("/clusters/markdown")
+async def export_clusters_markdown(
+    request: Request,
+    owner: str,
+    repo: str,
+    force: bool = Query(False),
+):
+    """Export issue clusters as a downloadable Markdown file."""
+    payload = await get_clusters(
+        request,
+        owner,
+        repo,
+        force,
+        ensure_subclusters=True,
+    )
+    clusters = payload.get("clusters", [])
+    issue_titles = payload.get("issue_titles", {})
+    total_issues = payload.get("total_issues", 0)
+
+    lines = [
+        f"# Issue Clusters: {owner}/{repo}",
+        "",
+        f"- Generated: {datetime.now(tz=timezone.utc).isoformat()}",
+        f"- Total open issues clustered: {total_issues}",
+        "",
+    ]
+
+    if clusters:
+        lines.extend(
+            _cluster_tree_to_markdown(
+                clusters,
+                issue_titles,
+                owner,
+                repo,
+            )
+        )
+    else:
+        lines.append("No open issues to cluster.")
+
+    content = "\n".join(lines).strip() + "\n"
+    filename = f"{owner}-{repo}-issue-clusters.md"
+
+    return Response(
+        content=content,
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+
+@router.get("/activity-summary")
+async def get_activity_summary(
+    request: Request,
+    owner: str,
+    repo: str,
+):
+    """Return a short AI-generated plain-text summary of recent activity.
+
+    Tries windows of 14 → 30 → 90 days so there is always something to
+    summarise as long as any data is synced.
+    """
+    client = request.app.state.ai_client
+
+    db = request.app.state.db
+    repo_id = await _get_repo_id_or_404(request, owner, repo)
+
+    issues = await get_cached_issues(db, repo_id)
+    prs = await get_cached_prs(db, repo_id)
+
+    def _n(dt: datetime | None) -> datetime | None:
+        """Normalise to naive UTC so tz-aware and naive datetimes compare cleanly."""
+        if dt is None:
+            return None
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+
+    def _filter(days: int):
+        since_naive = (datetime.now(tz=timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+        opened = [i for i in issues if _n(i.created_at) and _n(i.created_at) >= since_naive]
+        closed = [i for i in issues if _n(i.closed_at) and _n(i.closed_at) >= since_naive]
+        pr_opened = [p for p in prs if _n(p.created_at) and _n(p.created_at) >= since_naive]
+        pr_merged = [p for p in prs if _n(p.merged_at) and _n(p.merged_at) >= since_naive]
+        return opened, closed, pr_opened, pr_merged
+
+    # Try progressively wider windows until we find activity.
+    period_days = 14
+    recent_opened, recent_closed, recent_pr_opened, recent_pr_merged = _filter(period_days)
+    for fallback_days in (30, 90):
+        if recent_opened or recent_closed or recent_pr_opened or recent_pr_merged:
+            break
+        period_days = fallback_days
+        recent_opened, recent_closed, recent_pr_opened, recent_pr_merged = _filter(period_days)
+
+    logger.warning(
+        "activity-summary %s/%s: window=%dd, %d opened, %d closed, "
+        "%d pr_opened, %d pr_merged (ai_client=%s)",
+        owner, repo, period_days,
+        len(recent_opened), len(recent_closed),
+        len(recent_pr_opened), len(recent_pr_merged), client is not None,
+    )
+
+    total_activity = (
+        len(recent_opened) + len(recent_closed)
+        + len(recent_pr_opened) + len(recent_pr_merged)
+    )
+    if client is None or total_activity == 0:
+        return {"summary": None}
+
+    data = {
+        "period_days": period_days,
+        "issues_opened": len(recent_opened),
+        "issues_opened_titles": [i.title for i in recent_opened[:10]],
+        "issues_closed": len(recent_closed),
+        "prs_opened": len(recent_pr_opened),
+        "prs_opened_titles": [p.title for p in recent_pr_opened[:10]],
+        "prs_merged": len(recent_pr_merged),
+        "open_issues_total": sum(1 for i in issues if not i.closed_at),
+    }
+
+    summary = await generate_repo_activity_summary(client, owner, repo, data)
+    return {"summary": summary or None, "period_days": period_days}

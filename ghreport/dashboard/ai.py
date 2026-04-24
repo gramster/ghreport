@@ -230,6 +230,54 @@ async def sub_cluster_issues(
 
 
 # ---------------------------------------------------------------------------
+# 5. Activity summaries (repo & member)
+# ---------------------------------------------------------------------------
+
+_REPO_ACTIVITY_SUMMARY_SYSTEM = """\
+You are a concise engineering reporter. Given two weeks of GitHub repository
+activity data, write a 2-4 sentence plain prose summary of what happened.
+Be specific and concrete — mention counts, contributor patterns, or notable
+areas. Do NOT use bullet points, markdown, or headings. Plain text only."""
+
+
+async def generate_repo_activity_summary(
+    client,
+    owner: str,
+    repo: str,
+    data: dict,
+) -> str:
+    """Generate a short plain-text summary of recent repo activity."""
+    payload = {"repository": f"{owner}/{repo}", **data}
+    return await _chat(
+        client,
+        _REPO_ACTIVITY_SUMMARY_SYSTEM,
+        json.dumps(payload, default=str),
+    )
+
+
+_MEMBER_ACTIVITY_SUMMARY_SYSTEM = """\
+You are a concise engineering reporter. Given two weeks of a developer's
+GitHub activity, write a 2-4 sentence plain prose summary of what they
+worked on. Be specific — mention PR or issue themes, code areas, or volume
+where interesting. Do NOT use bullet points, markdown, or headings.
+Plain text only."""
+
+
+async def generate_member_activity_summary(
+    client,
+    login: str,
+    data: dict,
+) -> str:
+    """Generate a short plain-text summary of a member's recent activity."""
+    payload = {"login": login, **data}
+    return await _chat(
+        client,
+        _MEMBER_ACTIVITY_SUMMARY_SYSTEM,
+        json.dumps(payload, default=str),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

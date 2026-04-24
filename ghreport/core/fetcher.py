@@ -44,6 +44,11 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     if isinstance(exc, (gidgethub.RateLimitExceeded,
                         gidgethub.GraphQLResponseTypeError)):
         return True
+    # QueryError from GraphQL API — check message for rate-limit language
+    if isinstance(exc, gidgethub.QueryError):
+        msg = str(exc).lower()
+        if "rate limit" in msg or "rate_limit" in msg:
+            return True
     if isinstance(exc, httpx.HTTPStatusError):
         return exc.response.status_code in (403, 429)
     return False
@@ -127,6 +132,7 @@ async def _graphql_with_retry(gh, query, *, cursor=None, chunk=100, repo_key=Non
             _rate_limit_until = None
             return result
         except (
+            gidgethub.QueryError,
             gidgethub.GraphQLResponseTypeError,
             gidgethub.RateLimitExceeded,
             httpx.HTTPStatusError,
@@ -470,7 +476,7 @@ async def get_raw_pull_requests(owner: str, repo: str, token: str, state: str = 
     remaining = 0
 
     if since is None:
-        since = datetime.now() - timedelta(days=365 * 10)
+        since = datetime.now() - timedelta(days=365)
 
     since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%d')
     until_str = datetime.now().astimezone(pytz.utc).strftime('%Y-%m-%d')
@@ -525,7 +531,7 @@ async def get_raw_issues(owner: str, repo: str, token: str, state: str = 'open',
     remaining = 0
 
     if since is None:
-        since = datetime.now() - timedelta(days=365 * 10)
+        since = datetime.now() - timedelta(days=365)
 
     since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%d')
     filter_key = 'updated' if use_updated else 'created'

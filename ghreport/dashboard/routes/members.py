@@ -215,3 +215,95 @@ def _fmt(dt: datetime | None) -> str | None:
     if not dt:
         return None
     return f"{dt.year}-{dt.month:02d}-{dt.day:02d}"
+
+
+@router.get("/activity-summary")
+async def member_activity_summary(
+    request: Request,
+    login: str,
+):
+    """Return a short AI-generated plain-text summary of recent activity.
+
+    Tries windows of 14 → 30 → 90 days so it always finds something as
+    long as any data is synced.
+    """
+    from ..ai import generate_member_activity_summary
+
+    client = request.app.state.ai_client
+    db = request.app.state.db
+
+    def _n(dt: datetime | None) -> datetime | None:
+        if dt is None:
+            return None
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+
+    async def _collect(days: int):
+        since_naive = (datetime.now(tz=timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+        ic_titles: list[str] = []
+        commented = 0
+        pr_titles: list[str] = []
+        pr_merged = 0
+        pr_reviewed = 0
+        lc = 0
+        for r in await db.get_all_repos():
+            for issue in await get_cached_issues(db, r["id"]):
+                active = (_n(issue.created_at) and _n(issue.created_at) >= since_naive) or any(
+                    _n(e.when) and _n(e.when) >= since_naive for e in issue.events
+                )
+                if not active:
+                    continue
+                if issue.created_by == login and _n(issue.created_at) and _n(issue.created_at) >= since_naive:
+                    ic_titles.append(issue.title)
+                elif any(
+                    e.actor == login and e.event == "comment" and _n(e.when) and _n(e.when) >= since_naive
+                    for e in issue.events
+                ):
+                    commented += 1
+            for pr in await get_cached_prs(db, r["id"]):
+                if pr.created_by == login and _n(pr.created_at) and _n(pr.created_at) >= since_naive:
+                    pr_titles.append(pr.title)
+                    if pr.merged_at:
+                        pr_merged += 1
+                    lc += pr.lines_changed
+                if login in (pr.reviewers or []) and _n(pr.created_at) and _n(pr.created_at) >= since_naive:
+                    pr_reviewed += 1
+        return ic_titles, commented, pr_titles, pr_merged, pr_reviewed, lc
+
+    # Try progressively wider windows until we find activity.
+    period_days = 14
+    ic_titles, commented, pr_titles, pr_merged, pr_reviewed, lc = await _collect(period_days)
+    for fallback_days in (30, 90):
+        if ic_titles or commented or pr_titles or pr_reviewed:
+            break
+        period_days = fallback_days
+        ic_titles, commented, pr_titles, pr_merged, pr_reviewed, lc = await _collect(period_days)
+
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    _log.warning(
+        "activity-summary member %s: window=%dd, %d issues_created, %d commented, "
+        "%d prs, %d reviewed (ai_client=%s)",
+        login, period_days, len(ic_titles), commented,
+        len(pr_titles), pr_reviewed, client is not None,
+    )
+
+    total = len(ic_titles) + commented + len(pr_titles) + pr_reviewed
+    if client is None or total == 0:
+        return {"summary": None}
+
+    data = {
+        "period_days": period_days,
+        "issues_created": len(ic_titles),
+        "issues_created_titles": ic_titles[:10],
+        "issues_commented": commented,
+        "prs_opened": len(pr_titles),
+        "prs_opened_titles": pr_titles[:10],
+        "prs_merged": pr_merged,
+        "prs_reviewed": pr_reviewed,
+        "lines_changed": lc,
+    }
+
+    summary = await generate_member_activity_summary(client, login, data)
+    return {"summary": summary or None, "period_days": period_days}

@@ -1,13 +1,20 @@
 """Team member detection for ghreport."""
 
+import logging
+
 from github import Github
+from github.GithubException import GithubException
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_members(owner: str, repo: str, token: str) -> set[str]:
     """
     Get the team members for a repo that have push or admin rights. This is not
-    public so if you are not in such a team (probably with admin rights) this will fail.
-    I haven't found a good way to use the GraphQL API for this so still uses REST API.
+    public, so if you are not in such a team (likely with admin rights)
+    this will fail. I haven't found a good way to use the GraphQL API
+    for this, so this still uses the REST API.
     """
     g = Github(token)
     ghrepo = g.get_repo(f'{owner}/{repo}')
@@ -19,14 +26,38 @@ def get_members(owner: str, repo: str, token: str) -> set[str]:
             try:
                 for member in team.get_members():
                     rtn.add(member.login)
-            except Exception:
-                pass
-    except Exception:
-        print(f"Couldn't get teams for repo {owner}/{repo}")
+            except GithubException as exc:
+                logger.debug(
+                    "Skipping members for one team in %s/%s (%s)",
+                    owner,
+                    repo,
+                    exc,
+                )
+    except GithubException as exc:
+        if exc.status == 403:
+            logger.info(
+                "No permission to list teams for repo %s/%s (403). "
+                "Continuing without GitHub team members.",
+                owner,
+                repo,
+            )
+        else:
+            logger.warning(
+                "Couldn't get teams for repo %s/%s: %s",
+                owner,
+                repo,
+                exc,
+            )
     return rtn
 
 
-def get_team_members(org: str, repo: str, token: str, extra_members: str | None, verbose: bool) -> set[str]:
+def get_team_members(
+    org: str,
+    repo: str,
+    token: str,
+    extra_members: str | None,
+    verbose: bool,
+) -> set[str]:
     members = set()
     if extra_members:
         if extra_members.startswith('+'):

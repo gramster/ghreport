@@ -25,6 +25,17 @@
         <div class="card"><div class="stat">{{ summary.total_lines_changed }}</div><div class="stat-label">Lines Changed</div></div>
       </div>
 
+      <div v-if="loadingSummary" class="activity-summary">
+        <span class="summary-loading">Generating activity summary…</span>
+      </div>
+      <div v-else-if="activitySummary" class="activity-summary">
+        <span class="summary-label">Last {{ summaryPeriodDays }} days</span>
+        {{ activitySummary }}
+      </div>
+      <div v-else-if="summaryError" class="activity-summary summary-error">
+        Activity summary unavailable.
+      </div>
+
       <div class="tab-buttons" style="margin-bottom: 1rem;">
         <button :class="{ active: activeTab === 'prs' }" @click="activeTab = 'prs'">PRs ({{ prs?.total || 0 }})</button>
         <button :class="{ active: activeTab === 'issues' }" @click="activeTab = 'issues'" style="margin-left: 0.5rem;">Issues ({{ issues?.total || 0 }})</button>
@@ -120,6 +131,10 @@ const summary = ref<any>(null)
 const prs = ref<any>(null)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const issues = ref<any>(null)
+const activitySummary = ref<string | null>(null)
+const summaryPeriodDays = ref<number>(14)
+const loadingSummary = ref(false)
+const summaryError = ref(false)
 
 function buildParams() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -181,10 +196,25 @@ async function load() {
   }
 }
 
+async function loadSummary() {
+  loadingSummary.value = true
+  activitySummary.value = null
+  summaryError.value = false
+  try {
+    const { data } = await axios.get(`/api/members/${props.login}/activity-summary`)
+    activitySummary.value = data.summary || null
+    summaryPeriodDays.value = data.period_days ?? 14
+  } catch {
+    summaryError.value = true
+  } finally {
+    loadingSummary.value = false
+  }
+}
+
 onMounted(async () => {
   const { data } = await axios.get('/api/repos')
   repos.value = data.map((r: { owner: string; name: string }) => ({ owner: r.owner, name: r.name }))
-  await load()
+  await Promise.all([load(), loadSummary()])
 })
 
 watch([selectedRepo, () => dateRange.since, () => dateRange.until, () => dateRange.coverageVersion], load)
@@ -221,6 +251,35 @@ watch([selectedRepo, () => dateRange.since, () => dateRange.until, () => dateRan
   border-color: #0366d6;
 }
 .muted { color: #586069; }
+.activity-summary {
+  background: #f6f8fa;
+  border: 1px solid #e1e4e8;
+  border-left: 3px solid #0366d6;
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #24292e;
+}
+.summary-loading {
+  color: #586069;
+  font-style: italic;
+}
+.summary-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #586069;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.35rem;
+}
+.summary-error {
+  color: #586069;
+  font-style: italic;
+  border-left-color: #e1e4e8;
+}
 .role-tag {
   display: inline-block;
   font-size: 0.75rem;

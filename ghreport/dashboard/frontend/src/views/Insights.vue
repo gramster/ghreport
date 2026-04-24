@@ -58,9 +58,14 @@
       <div class="card insight-card">
         <div class="insight-header">
           <h3>Issue Clusters</h3>
-          <button class="primary" @click="loadClusters(true)" :disabled="clustersLoading">
-            {{ clustersLoading ? 'Clustering...' : 'Re-cluster' }}
-          </button>
+          <div style="display: flex; gap: 0.5rem;">
+            <button @click="exportClustersMarkdown" :disabled="clustersLoading || exportingMarkdown">
+              {{ exportingMarkdown ? 'Exporting...' : 'Export Markdown' }}
+            </button>
+            <button class="primary" @click="loadClusters(true)" :disabled="clustersLoading || exportingMarkdown">
+              {{ clustersLoading ? 'Clustering...' : 'Re-cluster' }}
+            </button>
+          </div>
         </div>
         <div v-if="clustersLoading" class="loading">
           <span class="spinner">↻</span> Grouping issues by topic...
@@ -82,6 +87,7 @@
         <div v-else class="loading">
           <span class="spinner">↻</span> Loading cached clusters...
         </div>
+        <p v-if="exportError" class="error-text" style="margin-top: 0.75rem;">{{ exportError }}</p>
       </div>
     </div>
   </div>
@@ -131,6 +137,8 @@ const totalIssues = ref(0)
 const clustersLoading = ref(false)
 const clustersError = ref('')
 const fromCache = ref(false)
+const exportingMarkdown = ref(false)
+const exportError = ref('')
 
 function renderMd(text: string): string {
   // Minimal markdown: bold, bullets, inline code
@@ -178,7 +186,7 @@ async function loadClusters(force = false) {
   clustersError.value = ''
   try {
     const { data } = await axios.get(`/api/repos/${props.owner}/${props.repo}/insights/clusters`, {
-      params: force ? { force: true } : {},
+      params: force ? { force: true } : { ensure_subclusters: true },
     })
     clusters.value = data.clusters
     issueTitles.value = data.issue_titles || {}
@@ -195,6 +203,38 @@ function switchToClusters() {
   activeTab.value = 'clusters'
   if (!clusters.value) {
     loadClusters(false)
+  }
+}
+
+async function exportClustersMarkdown() {
+  exportingMarkdown.value = true
+  exportError.value = ''
+  try {
+    const response = await axios.get(
+      `/api/repos/${props.owner}/${props.repo}/insights/clusters/markdown`,
+      {
+        responseType: 'blob',
+      },
+    )
+
+    const blob = new Blob([response.data], { type: 'text/markdown;charset=utf-8' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const disposition = response.headers['content-disposition'] as string | undefined
+    const match = disposition?.match(/filename="?([^";]+)"?/) 
+    const filename = match?.[1] || `${props.owner}-${props.repo}-issue-clusters.md`
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    window.setTimeout(() => {
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    }, 1000)
+  } catch (e: any) {
+    exportError.value = 'Failed to export markdown'
+  } finally {
+    exportingMarkdown.value = false
   }
 }
 </script>

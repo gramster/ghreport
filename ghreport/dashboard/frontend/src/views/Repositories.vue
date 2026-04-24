@@ -6,6 +6,7 @@
 
     <div v-if="loading" class="loading">Loading...</div>
     <template v-else>
+      <p v-if="loadError" style="color: #cb2431; margin-bottom: 0.75rem;">{{ loadError }}</p>
       <div class="grid">
         <div v-for="r in summary?.repos" :key="`${r.owner}/${r.name}`" class="card">
           <h3>
@@ -58,14 +59,23 @@ const summary = ref<AggSummary | null>(null)
 const loading = ref(true)
 const newRepo = ref('')
 const addError = ref<string | null>(null)
+const loadError = ref<string | null>(null)
 
 async function load() {
+  loadError.value = null
   loading.value = true
   try {
     const { data } = await axios.get<AggSummary>('/api/aggregate/summary', {
       params: dateRangeStore.params,
     })
     summary.value = data
+  } catch (e: unknown) {
+    if (axios.isAxiosError(e)) {
+      const detail = typeof e.response?.data?.detail === 'string' ? e.response.data.detail : null
+      loadError.value = detail || `Failed to load repositories (${e.response?.status || 'network error'})`
+    } else {
+      loadError.value = 'Failed to load repositories'
+    }
   } finally {
     loading.value = false
   }

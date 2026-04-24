@@ -72,7 +72,11 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
                                        team=team, force=force,
                                        backfill_since=backfill_since)
     except Exception as exc:
-        # Mark sync as failed
+        # Roll back any partial data writes (issues/PRs upserted before the
+        # failure) so the DB stays consistent.  The sync_log INSERT above was
+        # already committed, so it is not affected by this rollback.
+        await db.db.rollback()
+        # Record the failure in a fresh transaction.
         completed_str = datetime.utcnow().isoformat()
         error_msg = f"{type(exc).__name__}: {exc}"
         await db.db.execute(
@@ -89,20 +93,28 @@ async def _sync_repo_inner(db: Database, owner: str, repo: str, token: str,
                             team: str | None = None, force: bool = False,
                             backfill_since: datetime | None = None) -> dict:
 
+    # Capture sync start time *before* any GitHub fetching.
+    # This becomes covered_until after the sync completes, ensuring the
+    # next incremental sync fetches from a point before any gaps could form.
+    sync_start = datetime.now(tz=timezone.utc)
+    is_backfill = backfill_since is not None
+
     # Determine since date for incremental sync
     since = None
-    if backfill_since:
+    if is_backfill:
         # Targeted backfill for a specific date range
         since = backfill_since
     elif not force:
         row = await (await db.db.execute(
-            "SELECT last_synced_at FROM repos WHERE id = ?", (repo_id,)
+            "SELECT sync_start_at FROM repos WHERE id = ?", (repo_id,)
         )).fetchone()
         if row and row[0]:
-            since = datetime.fromisoformat(row[0]) - timedelta(days=1)
+            since = datetime.fromisoformat(row[0])
+            if since.tzinfo is None:
+                since = since.replace(tzinfo=timezone.utc)
 
     # Track the effective search boundary for data_since
-    effective_since = since or (datetime.now(tz=timezone.utc) - timedelta(days=365 * 10))
+    effective_since = since or (datetime.now(tz=timezone.utc) - timedelta(days=365))
 
     # Fetch team members
     members = get_members(owner, repo, token)
@@ -181,6 +193,11 @@ async def _sync_repo_inner(db: Database, owner: str, repo: str, token: str,
         (completed_str, issues_count, prs_count, sync_id),
     )
     await db.update_last_synced(repo_id, completed_str)
+    # For regular syncs (not backfills), advance covered_until to this
+    # sync's start time.  Using start (not completion) means the next
+    # incremental will re-fetch any items that changed *during* this sync.
+    if not is_backfill:
+        await db.update_sync_start(repo_id, sync_start.isoformat())
     await db.update_data_since(repo_id, effective_since.isoformat())
     await db.db.commit()
 
@@ -399,7 +416,17 @@ async def get_sync_status(db: Database, repo_id: int) -> dict | None:
         (repo_id,)
     )
     row = await cursor.fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    result = dict(row)
+    # Attach coverage bounds from repos table
+    repo_row = await (await db.db.execute(
+        "SELECT data_since, sync_start_at FROM repos WHERE id = ?", (repo_id,)
+    )).fetchone()
+    if repo_row:
+        result["covered_from"] = repo_row["data_since"]
+        result["covered_until"] = repo_row["sync_start_at"]
+    return result
 
 
 async def scan_copilot_users(db: Database) -> dict[str, set[str]]:

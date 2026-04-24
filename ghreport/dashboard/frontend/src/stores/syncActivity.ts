@@ -20,7 +20,9 @@ export const useSyncActivityStore = defineStore('syncActivity', () => {
   const retries = ref<Record<string, RetryInfo>>({})
   const rateLimitedUntil = ref<string | null>(null)
   const errors = ref<SyncError[]>([])
+  const now = ref(Date.now())
   let pollTimer: ReturnType<typeof setInterval> | null = null
+  let clockTimer: ReturnType<typeof setInterval> | null = null
 
   const hasRetries = computed(() => Object.keys(retries.value).length > 0)
 
@@ -31,7 +33,7 @@ export const useSyncActivityStore = defineStore('syncActivity', () => {
 
   const rateLimitRemaining = computed(() => {
     if (!rateLimitedUntil.value) return 0
-    const diff = new Date(rateLimitedUntil.value).getTime() - Date.now()
+    const diff = new Date(rateLimitedUntil.value).getTime() - now.value
     return Math.max(0, Math.ceil(diff / 1000))
   })
 
@@ -59,6 +61,14 @@ export const useSyncActivityStore = defineStore('syncActivity', () => {
       retries.value = data.retries || {}
       rateLimitedUntil.value = data.rate_limited_until || null
       errors.value = data.errors || []
+      // Start/stop the per-second clock tick
+      if (rateLimitedUntil.value && new Date(rateLimitedUntil.value) > new Date()) {
+        if (!clockTimer) {
+          clockTimer = setInterval(() => { now.value = Date.now() }, 1000)
+        }
+      } else {
+        if (clockTimer) { clearInterval(clockTimer); clockTimer = null }
+      }
     } catch {
       // Silently ignore polling failures
     }
@@ -74,6 +84,10 @@ export const useSyncActivityStore = defineStore('syncActivity', () => {
     if (pollTimer) {
       clearInterval(pollTimer)
       pollTimer = null
+    }
+    if (clockTimer) {
+      clearInterval(clockTimer)
+      clockTimer = null
     }
   }
 

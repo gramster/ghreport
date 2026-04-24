@@ -88,9 +88,10 @@ class SyncScheduler:
                 result["issues_fetched"], result["prs_fetched"],
             )
             return True
-        except GitHubRateLimitError as exc:
-            logger.warning("Rate-limited syncing %s/%s", owner, repo)
-            self._record_error(owner, repo, exc)
+        except GitHubRateLimitError:
+            logger.warning("Rate-limited syncing %s/%s — cooldown active", owner, repo)
+            # Do NOT record in error list; the rate-limit banner + countdown
+            # already communicates this to the user.
             return False
         except Exception as exc:
             logger.exception("Failed to sync %s/%s", owner, repo)
@@ -109,7 +110,7 @@ class SyncScheduler:
             async with self._sync_lock:
                 ok = await self._sync_one_repo(owner, repo, force=force)
             if not ok:
-                break  # rate-limited, stop entirely
+                return  # rate-limited — abort entire sync cycle
 
         # Then sync all repos in DB
         repos = await self.db.get_all_repos()
@@ -126,7 +127,7 @@ class SyncScheduler:
             async with self._sync_lock:
                 ok = await self._sync_one_repo(r["owner"], r["name"])
             if not ok:
-                break  # rate-limited, stop
+                return  # rate-limited — stop and wait for next scheduled run
 
     async def sync_one(self, owner: str, repo: str):
         """Sync a single repo in the background."""
@@ -149,8 +150,8 @@ class SyncScheduler:
         if key not in self._priority_queue:
             self._priority_queue.append(key)
             logger.info("Queued %s/%s for priority sync (force=%s)", owner, repo, force)
-        # Kick off processing if nothing is currently running
-        if not self._sync_lock.locked():
+        # Kick off processing if nothing is currently running and not rate-limited
+        if not self._sync_lock.locked() and not self._check_rate_limit():
             asyncio.ensure_future(self._drain_queue())
 
     async def _drain_queue(self):
