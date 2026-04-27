@@ -85,37 +85,39 @@ def _filter_cluster_tree(clusters: list[dict], valid_issues: set[int]) -> list[d
     return filtered
 
 
-async def _load_cluster_tree_from_repo_config(db, repo_id: int) -> list[dict] | None:
-    """Load persisted cluster tree from repos.config_json."""
+async def _load_repo_config(db, repo_id: int) -> dict:
+    """Load repos.config_json as a dict (empty dict if missing/invalid)."""
     row = await (await db.db.execute(
         "SELECT config_json FROM repos WHERE id = ?", (repo_id,)
     )).fetchone()
     if not row or not row["config_json"]:
-        return None
+        return {}
     try:
         cfg = json.loads(row["config_json"])
+        return cfg if isinstance(cfg, dict) else {}
     except (json.JSONDecodeError, TypeError):
-        return None
+        return {}
+
+
+async def _load_cluster_tree_from_repo_config(db, repo_id: int) -> list[dict] | None:
+    """Load persisted cluster tree from repos.config_json."""
+    cfg = await _load_repo_config(db, repo_id)
     tree = cfg.get(_CLUSTER_TREE_CONFIG_KEY)
-    if isinstance(tree, list):
-        return tree
-    return None
+    return tree if isinstance(tree, list) else None
 
 
-async def _save_cluster_tree_to_repo_config(db, repo_id: int, clusters: list[dict]):
-    """Persist full cluster tree in repos.config_json."""
-    row = await (await db.db.execute(
-        "SELECT config_json FROM repos WHERE id = ?", (repo_id,)
-    )).fetchone()
-    cfg: dict = {}
-    if row and row["config_json"]:
-        try:
-            loaded = json.loads(row["config_json"])
-            if isinstance(loaded, dict):
-                cfg = loaded
-        except (json.JSONDecodeError, TypeError):
-            cfg = {}
+async def _save_cluster_tree_to_repo_config(
+    db, repo_id: int, clusters: list[dict], *, record_full_recluster: bool = False
+):
+    """Persist full cluster tree in repos.config_json.
+
+    If record_full_recluster=True, also stamps last_full_cluster_at
+    with the current UTC time so callers can detect stale hierarchies.
+    """
+    cfg = await _load_repo_config(db, repo_id)
     cfg[_CLUSTER_TREE_CONFIG_KEY] = clusters
+    if record_full_recluster:
+        cfg["last_full_cluster_at"] = datetime.now(timezone.utc).isoformat()
     await db.db.execute(
         "UPDATE repos SET config_json = ? WHERE id = ?",
         (json.dumps(cfg), repo_id),
@@ -463,9 +465,32 @@ async def get_clusters(
 
     Returns cached clusters when available. Only sends unclustered
     issues to the LLM. Use force=true to re-cluster everything.
+
+    Auto-reclustering policy:
+    - If the last full recluster was < 7 days ago, only newly-unclustered
+      issues are categorised into the existing hierarchy.
+    - If it was >= 7 days ago (or has never been run), a full recluster
+      is performed automatically, rebuilding the hierarchy from scratch.
+    - force=true always triggers a full recluster regardless of age.
     """
     db = request.app.state.db
     repo_id = await _get_repo_id_or_404(request, owner, repo)
+
+    # Determine whether we need a full recluster based on age of last run.
+    cfg = await _load_repo_config(db, repo_id)
+    last_full_str: str | None = cfg.get("last_full_cluster_at")
+    last_full: datetime | None = None
+    if last_full_str:
+        try:
+            last_full = datetime.fromisoformat(last_full_str)
+            if last_full.tzinfo is None:
+                last_full = last_full.replace(tzinfo=timezone.utc)
+        except ValueError:
+            last_full = None
+
+    _RECLUSTER_INTERVAL = timedelta(days=7)
+    now_utc = datetime.now(timezone.utc)
+    needs_full = force or last_full is None or (now_utc - last_full) >= _RECLUSTER_INTERVAL
 
     # Load all open issues with their cached cluster assignment
     cursor = await db.db.execute(
@@ -479,6 +504,7 @@ async def get_clusters(
         return {
             "clusters": [], "total_issues": 0,
             "issue_titles": {}, "from_cache": True,
+            "last_full_cluster_at": last_full_str,
         }
 
     title_map: dict[int, str] = {}
@@ -493,7 +519,8 @@ async def get_clusters(
             "number": num, "title": row["title"], "labels": labels,
         }
 
-        if not force and row["cluster"]:
+        # When doing incremental, treat already-clustered issues as cached.
+        if not needs_full and row["cluster"]:
             cached.setdefault(row["cluster"], []).append(num)
         else:
             unclustered.append(issue_dict)
@@ -507,9 +534,9 @@ async def get_clusters(
             "labels": _extract_labels(row["raw_json"]),
         }
 
-    # If everything is cached and we're not forcing, return cached clusters
-    # directly. Do not re-cluster AI when all open issues are already tagged.
-    if not unclustered and not force:
+    # If everything is cached and a full recluster is not needed, return from
+    # cache without calling the LLM.
+    if not unclustered and not needs_full:
         # Prefer persisted nested tree when available.
         persisted_tree = await _load_cluster_tree_from_repo_config(db, repo_id)
         valid_issues = set(title_map.keys())
@@ -521,6 +548,7 @@ async def get_clusters(
                     "total_issues": len(rows),
                     "issue_titles": title_map,
                     "from_cache": True,
+                    "last_full_cluster_at": last_full_str,
                 }
 
         # Legacy cache compatibility: if we only have top-level issue tags,
@@ -545,6 +573,7 @@ async def get_clusters(
                 "total_issues": len(rows),
                 "issue_titles": title_map,
                 "from_cache": False,
+                "last_full_cluster_at": last_full_str,
             }
 
         clusters = [
@@ -556,13 +585,14 @@ async def get_clusters(
             "total_issues": len(rows),
             "issue_titles": title_map,
             "from_cache": True,
+            "last_full_cluster_at": last_full_str,
         }
 
     # Need AI client for clustering
     client = _get_ai_client(request)
 
-    if force:
-        # Re-cluster all issues from scratch
+    if needs_full:
+        # Re-cluster all issues from scratch (forced or stale hierarchy).
         all_issues = [
             {"number": r["number"], "title": r["title"],
              "labels": _extract_labels(r["raw_json"])}
@@ -572,7 +602,7 @@ async def get_clusters(
             client, owner, repo, all_issues)
     else:
         # Cluster only new issues, providing existing cluster
-        # names as context so the LLM can reuse them
+        # names as context so the LLM can reuse them.
         existing_names = list(cached.keys())
         clusters = await cluster_issues(
             client, owner, repo, unclustered,
@@ -608,8 +638,12 @@ async def get_clusters(
                 (c["name"], repo_id, num),
             )
 
-    # Persist full nested cluster tree for future cached responses/exports.
-    await _save_cluster_tree_to_repo_config(db, repo_id, clusters)
+    # Persist full nested cluster tree; stamp timestamp if this was a full run.
+    await _save_cluster_tree_to_repo_config(
+        db, repo_id, clusters, record_full_recluster=needs_full
+    )
+    if needs_full:
+        last_full_str = datetime.now(timezone.utc).isoformat()
 
     await db.db.commit()
 
@@ -618,6 +652,7 @@ async def get_clusters(
         "total_issues": len(rows),
         "issue_titles": title_map,
         "from_cache": False,
+        "last_full_cluster_at": last_full_str,
     }
 
 

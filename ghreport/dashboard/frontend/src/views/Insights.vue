@@ -71,7 +71,10 @@
           <span class="spinner">↻</span> Grouping issues by topic...
         </div>
         <template v-else-if="clusters && clusters.length > 0">
-          <p class="hint-text" style="margin-bottom: 0.75rem;">{{ totalIssues }} open issues grouped into {{ clusters.length }} clusters<span v-if="fromCache"> (cached)</span></p>
+          <p class="hint-text" style="margin-bottom: 0.75rem;">
+            {{ totalIssues }} open issues grouped into {{ clusters.length }} clusters<span v-if="fromCache"> (cached)</span>
+            &nbsp;·&nbsp; Last full recluster: {{ clusterAgeLabel(lastFullClusterAt) }}
+          </p>
           <ClusterNode
             v-for="(cluster, idx) in clusters"
             :key="idx"
@@ -137,8 +140,18 @@ const totalIssues = ref(0)
 const clustersLoading = ref(false)
 const clustersError = ref('')
 const fromCache = ref(false)
+const lastFullClusterAt = ref<string | null>(null)
 const exportingMarkdown = ref(false)
 const exportError = ref('')
+
+function clusterAgeLabel(iso: string | null): string {
+  if (!iso) return 'Never'
+  const diffMs = Date.now() - new Date(iso).getTime()
+  const days = Math.floor(diffMs / 86400000)
+  if (days === 0) return 'Today'
+  if (days === 1) return '1 day ago'
+  return `${days} days ago`
+}
 
 function renderMd(text: string): string {
   // Minimal markdown: bold, bullets, inline code
@@ -192,6 +205,7 @@ async function loadClusters(force = false) {
     issueTitles.value = data.issue_titles || {}
     totalIssues.value = data.total_issues
     fromCache.value = !!data.from_cache
+    lastFullClusterAt.value = data.last_full_cluster_at ?? null
   } catch (e: any) {
     clustersError.value = e.response?.data?.detail || 'Failed to cluster issues'
   } finally {

@@ -129,7 +129,14 @@ def create_app(config_path: str | None = None) -> FastAPI:
         # SPA fallback: any non-API route serves index.html for Vue Router
         @app.get("/{full_path:path}")
         async def spa_fallback(request: Request, full_path: str):
-            return FileResponse(str(index_html))
+            return FileResponse(
+                str(index_html),
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
 
     return app
 

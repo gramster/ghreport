@@ -62,4 +62,17 @@ const router = createRouter({
   ],
 })
 
+// When a lazy-loaded chunk fails (e.g. after a frontend rebuild that renamed
+// asset files), force a full page reload to the target URL so the browser
+// picks up the fresh index.html with updated asset references.
+router.onError((error, to) => {
+  const isChunkError =
+    error.message.includes('Failed to fetch dynamically imported module') ||
+    error.message.includes('Importing a module script failed') ||
+    error.message.includes('Unable to preload CSS')
+  if (isChunkError) {
+    window.location.assign(to.fullPath)
+  }
+})
+
 export default router
