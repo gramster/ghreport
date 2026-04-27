@@ -185,7 +185,11 @@ def parse_raw_issue(issue: dict, members: set[str]) -> Issue | None:
 
     return Issue(number, title, created_by, closed_by, created_at, closed_at,
                  first_team_response_at, last_team_response_at,
-                 last_op_response_at, last_response_at, events)
+                 last_op_response_at, last_response_at, events,
+                 reactions=sum(
+                     g.get("users", {}).get("totalCount", 0)
+                     for g in (issue.get("reactionGroups") or [])
+                 ))
 
 
 def get_pull_requests(owner: str, repo: str, token: str, state: str = 'open',

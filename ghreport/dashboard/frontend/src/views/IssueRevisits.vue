@@ -24,14 +24,19 @@
         <span style="margin-left: 1rem;"></span>
         <button :class="{ active: activeCat === 'stale' }" @click="activeCat = 'stale'">Stale</button>
       </div>
+      <div class="filter-row" style="margin-bottom: 0.75rem;">
+        <span class="filter-label">Min reactions:</span>
+        <input type="number" v-model.number="minReactions" min="0" style="width: 4rem; padding: 0.3rem; border: 1px solid #e1e4e8; border-radius: 4px;" />
+      </div>
 
-      <h3>{{ activeTab === 'bugs' ? 'Bug Issues' : 'Non-Bug Issues' }} — {{ formatCat(activeCat) }} ({{ activeItems.length }})</h3>
-      <table v-if="activeItems.length">
+      <h3>{{ activeTab === 'bugs' ? 'Bug Issues' : 'Non-Bug Issues' }} — {{ formatCat(activeCat) }} ({{ filteredItems.length }})</h3>
+      <table v-if="filteredItems.length">
         <thead><tr>
           <th class="sortable" @click="toggleSort('number')">#{{ indicator('number') }}</th>
           <th class="sortable" @click="toggleSort('title')">Title{{ indicator('title') }}</th>
           <th class="sortable" @click="toggleSort('created_by')">Created By{{ indicator('created_by') }}</th>
           <th class="sortable" @click="toggleSort('created_at')">Created{{ indicator('created_at') }}</th>
+          <th class="sortable" @click="toggleSort('reactions')">Reactions{{ indicator('reactions') }}</th>
           <th></th>
         </tr></thead>
         <tbody>
@@ -40,6 +45,7 @@
             <td>{{ issue.title }}</td>
             <td>{{ issue.created_by }}</td>
             <td>{{ issue.created_at }}</td>
+            <td>{{ issue.reactions ?? 0 }}</td>
             <td><span v-if="issue.star" class="star">★</span></td>
           </tr>
         </tbody>
@@ -56,7 +62,7 @@ import { useDateRangeStore } from '@/stores/dateRange'
 
 interface RevisitIssue {
   number: number; title: string; created_by: string; created_at: string; star: boolean
-  days_op?: number; days_team?: number; days_third_party?: number
+  days_op?: number; days_team?: number; days_third_party?: number; reactions?: number
 }
 
 interface RevisitsData {
@@ -85,6 +91,13 @@ const activeItems = computed<RevisitIssue[]>(() => {
   return data.value?.sections[activeTab.value]?.[activeCat.value] || []
 })
 
+const minReactions = ref(0)
+
+const filteredItems = computed<RevisitIssue[]>(() => {
+  if (minReactions.value <= 0) return activeItems.value
+  return activeItems.value.filter(i => (i.reactions ?? 0) >= minReactions.value)
+})
+
 const sortState = reactive<{ key: string; dir: 'asc' | 'desc' }>({ key: '', dir: 'asc' })
 
 function toggleSort(key: string) {
@@ -102,10 +115,10 @@ function indicator(key: string): string {
 }
 
 const sortedItems = computed<RevisitIssue[]>(() => {
-  if (!sortState.key) return activeItems.value
+  if (!sortState.key) return filteredItems.value
   const dir = sortState.dir === 'asc' ? 1 : -1
   const k = sortState.key as keyof RevisitIssue
-  return [...activeItems.value].sort((a, b) => {
+  return [...filteredItems.value].sort((a, b) => {
     const av = a[k], bv = b[k]
     if (av == null && bv == null) return 0
     if (av == null) return dir

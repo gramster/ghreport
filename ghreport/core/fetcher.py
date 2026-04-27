@@ -198,6 +198,12 @@ query ($cursor: String, $chunk: Int) {{
           editor {{
             login
           }}
+          reactionGroups {{
+            content
+            users {{
+              totalCount
+            }}
+          }}
           timelineItems(
             first: 100
             itemTypes: [CLOSED_EVENT, LABELED_EVENT, UNLABELED_EVENT, ISSUE_COMMENT]
@@ -280,6 +286,12 @@ query ($cursor: String, $chunk: Int) {{
           }}
           editor {{
             login
+          }}
+          reactionGroups {{
+            content
+            users {{
+              totalCount
+            }}
           }}
           timelineItems(
             first: 100

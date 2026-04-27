@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS issues (
     last_op_response_at TEXT,
     last_response_at TEXT,
     state TEXT NOT NULL DEFAULT 'open',
+    reactions INTEGER DEFAULT 0,
     raw_json TEXT,
     UNIQUE(repo_id, number)
 );
@@ -171,6 +172,10 @@ class Database:
         if "cluster" not in issue_cols:
             await self._db.execute(
                 "ALTER TABLE issues ADD COLUMN cluster TEXT"
+            )
+        if "reactions" not in issue_cols:
+            await self._db.execute(
+                "ALTER TABLE issues ADD COLUMN reactions INTEGER DEFAULT 0"
             )
 
     async def _seed_defaults(self):

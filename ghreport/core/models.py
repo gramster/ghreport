@@ -25,6 +25,7 @@ class Issue:
     last_op_response_at: datetime | None  # last comment by OP
     last_response_at: datetime | None  # last comment by anyone
     events: list[Event]
+    reactions: int = 0  # total reaction count across all reaction types
 
 
 @dataclass

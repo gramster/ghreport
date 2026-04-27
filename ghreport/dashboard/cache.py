@@ -25,6 +25,17 @@ def _parse_dt(s: str | None) -> datetime | None:
     return datetime.fromisoformat(s)
 
 
+def _extract_reactions(raw: dict) -> int:
+    """Sum up all reaction user counts from reactionGroups."""
+    total = 0
+    for group in raw.get("reactionGroups") or []:
+        try:
+            total += group["users"]["totalCount"]
+        except (KeyError, TypeError):
+            pass
+    return total
+
+
 def _collect_copilot_users(raw: dict, found: set[str]):
     """Scan a raw issue/PR for usernames containing 'copilot' (case-insensitive)."""
     for field in ('author', 'mergedBy', 'actor', 'assignee'):
@@ -217,25 +228,25 @@ async def _upsert_issue(db: Database, repo_id: int, issue: Issue, raw: dict, sta
         await db.db.execute("""
             UPDATE issues SET title=?, created_by=?, closed_by=?, created_at=?, closed_at=?,
             first_team_response_at=?, last_team_response_at=?, last_op_response_at=?,
-            last_response_at=?, state=?, raw_json=? WHERE id=?
+            last_response_at=?, state=?, reactions=?, raw_json=? WHERE id=?
         """, (issue.title, issue.created_by, issue.closed_by,
               _dt_str(issue.created_at), _dt_str(issue.closed_at),
               _dt_str(issue.first_team_response_at), _dt_str(issue.last_team_response_at),
               _dt_str(issue.last_op_response_at), _dt_str(issue.last_response_at),
-              state, json.dumps(raw), issue_db_id))
+              state, issue.reactions, json.dumps(raw), issue_db_id))
         # Replace events
         await db.db.execute("DELETE FROM events WHERE issue_id = ?", (issue_db_id,))
     else:
         cursor = await db.db.execute("""
             INSERT INTO issues (repo_id, number, title, created_by, closed_by, created_at,
             closed_at, first_team_response_at, last_team_response_at, last_op_response_at,
-            last_response_at, state, raw_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            last_response_at, state, reactions, raw_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (repo_id, issue.number, issue.title, issue.created_by, issue.closed_by,
               _dt_str(issue.created_at), _dt_str(issue.closed_at),
               _dt_str(issue.first_team_response_at), _dt_str(issue.last_team_response_at),
               _dt_str(issue.last_op_response_at), _dt_str(issue.last_response_at),
-              state, json.dumps(raw)))
+              state, issue.reactions, json.dumps(raw)))
         issue_db_id = cursor.lastrowid
 
     # Insert events
@@ -336,6 +347,7 @@ async def get_cached_issues(db: Database, repo_id: int,
             last_op_response_at=_parse_dt(row_dict["last_op_response_at"]),
             last_response_at=_parse_dt(row_dict["last_response_at"]),
             events=events,
+            reactions=row_dict.get("reactions") or 0,
         ))
     return issues
 

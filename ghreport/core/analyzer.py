@@ -159,6 +159,7 @@ def revisits_data(now: datetime, owner: str, repo: str, issues: list[Issue],
                         "created_by": issue.created_by,
                         "created_at": format_date(issue.created_at),
                         "star": star, "days_op": diff,
+                        "reactions": issue.reactions,
                     })
 
         # OP responded after team
@@ -176,6 +177,7 @@ def revisits_data(now: datetime, owner: str, repo: str, issues: list[Issue],
                         "created_by": issue.created_by,
                         "created_at": format_date(issue.created_at),
                         "star": star, "days_op": op_days, "days_team": team_days,
+                        "reactions": issue.reactions,
                     })
 
         # 3rd party responded after team
@@ -194,6 +196,7 @@ def revisits_data(now: datetime, owner: str, repo: str, issues: list[Issue],
                         "created_by": issue.created_by,
                         "created_at": format_date(issue.created_at),
                         "star": star, "days_third_party": other_days, "days_team": team_days,
+                        "reactions": issue.reactions,
                     })
 
         # Stale
@@ -212,6 +215,7 @@ def revisits_data(now: datetime, owner: str, repo: str, issues: list[Issue],
                         "created_by": issue.created_by,
                         "created_at": format_date(issue.created_at),
                         "star": star, "days_team": diff,
+                        "reactions": issue.reactions,
                     })
 
         result["sections"][section_key] = section
@@ -276,6 +280,7 @@ def closed_issues_data(now: datetime, owner: str, repo: str,
             "closed_at": format_date(i.closed_at) if i.closed_at else None,
             "closed_by": i.closed_by,
             "days_open": date_diff(i.closed_at, i.created_at).days if i.closed_at else 0,
+            "reactions": i.reactions,
         } for i in sorted(recently_closed, key=lambda x: x.closed_at or x.created_at, reverse=True)],
     }
 

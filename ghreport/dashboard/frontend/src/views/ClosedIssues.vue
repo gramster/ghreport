@@ -11,8 +11,12 @@
 
     <div v-if="loading" class="loading">Loading...</div>
     <template v-else-if="data">
-      <p>{{ data.issues?.length || 0 }} issues closed in window</p>
-      <table v-if="data.issues?.length">
+      <div class="filter-row" style="margin-bottom: 0.75rem;">
+        <span class="filter-label">Min reactions:</span>
+        <input type="number" v-model.number="minReactions" min="0" style="width: 4rem; padding: 0.3rem; border: 1px solid #e1e4e8; border-radius: 4px;" />
+      </div>
+      <p>{{ filteredIssues.length }} issues closed in window</p>
+      <table v-if="filteredIssues.length">
         <thead><tr>
           <th class="sortable" @click="sort.toggleSort('number')">#{{ sort.sortIndicator('number') }}</th>
           <th class="sortable" @click="sort.toggleSort('title')">Title{{ sort.sortIndicator('title') }}</th>
@@ -20,6 +24,7 @@
           <th class="sortable" @click="sort.toggleSort('closed_at')">Closed{{ sort.sortIndicator('closed_at') }}</th>
           <th class="sortable" @click="sort.toggleSort('closed_by')">Closed By{{ sort.sortIndicator('closed_by') }}</th>
           <th class="sortable" @click="sort.toggleSort('days_open')">Days Open{{ sort.sortIndicator('days_open') }}</th>
+          <th class="sortable" @click="sort.toggleSort('reactions')">Reactions{{ sort.sortIndicator('reactions') }}</th>
         </tr></thead>
         <tbody>
           <tr v-for="issue in sort.sorted.value" :key="issue.number">
@@ -29,6 +34,7 @@
             <td>{{ issue.closed_at }}</td>
             <td>{{ issue.closed_by }}</td>
             <td>{{ issue.days_open }}</td>
+            <td>{{ issue.reactions ?? 0 }}</td>
           </tr>
         </tbody>
       </table>
@@ -44,7 +50,7 @@ import { useSortable } from '@/composables/useSortable'
 
 interface ClosedIssue {
   number: number; title: string; created_by: string
-  closed_at: string | null; closed_by: string | null; days_open: number
+  closed_at: string | null; closed_by: string | null; days_open: number; reactions: number
 }
 
 interface ClosedIssuesData {
@@ -55,9 +61,15 @@ const dateRange = useDateRangeStore()
 const props = defineProps<{ owner: string; repo: string }>()
 const data = ref<ClosedIssuesData | null>(null)
 const loading = ref(true)
+const minReactions = ref(0)
 
-const issueList = computed(() => data.value?.issues || [])
-const sort = useSortable(issueList, 'closed_at', 'desc')
+const filteredIssues = computed(() => {
+  const all = data.value?.issues || []
+  if (minReactions.value <= 0) return all
+  return all.filter(i => (i.reactions ?? 0) >= minReactions.value)
+})
+
+const sort = useSortable(filteredIssues, 'closed_at', 'desc')
 
 async function load() {
   loading.value = true
