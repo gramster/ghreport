@@ -286,4 +286,4 @@ async def chart_activity_counts(
         await get_cached_prs(db, repo_id, state="closed"),
         since_dt, until_dt)
     return activity_counts_weekly_data(
-        issues, merged_prs, closed_prs)
+        issues, merged_prs, closed_prs, since=since_dt, until=until_dt)

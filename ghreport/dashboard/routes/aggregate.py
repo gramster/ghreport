@@ -191,7 +191,8 @@ async def aggregate_chart(
             request, state="closed",
             since_dt=since_dt, until_dt=until_dt)
         return activity_counts_weekly_data(
-            issues, merged_prs, closed_prs)
+            issues, merged_prs, closed_prs,
+            since=since_dt, until=until_dt)
     else:
         from fastapi import HTTPException
         raise HTTPException(400, f"Unknown chart type: {chart_type}")

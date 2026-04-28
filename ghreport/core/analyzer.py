@@ -82,16 +82,21 @@ def count_by_week(
     data: list[PullRequest] | list[Issue],
     get_date: Callable[[Any], datetime | None],
     since: datetime | None = None,
+    until: datetime | None = None,
 ) -> dict[str, int]:
     """Count items per ISO week."""
     if since is not None:
         since = utc_to_local(since)
+    if until is not None:
+        until = utc_to_local(until)
     weeks: dict[str, int] = {}
     for item in data:
         dt = get_date(item)
         if dt is None:
             continue
         if since is not None and dt < since:
+            continue
+        if until is not None and dt > until:
             continue
         key = _iso_week_label(dt)
         weeks[key] = weeks.get(key, 0) + 1
@@ -371,11 +376,13 @@ def activity_counts_weekly_data(
     issues: list[Issue],
     merged_prs: list[PullRequest],
     closed_prs: list[PullRequest],
+    since: datetime | None = None,
+    until: datetime | None = None,
 ) -> dict[str, Any]:
     """Weekly counts of new issues, merged PRs, closed PRs."""
-    new_issues = count_by_week(issues, lambda x: x.created_at)
-    merged = count_by_week(merged_prs, lambda x: x.merged_at)
-    closed = count_by_week(closed_prs, lambda x: x.closed_at)
+    new_issues = count_by_week(issues, lambda x: x.created_at, since=since, until=until)
+    merged = count_by_week(merged_prs, lambda x: x.merged_at, since=since, until=until)
+    closed = count_by_week(closed_prs, lambda x: x.closed_at, since=since, until=until)
     weeks = sorted(set(new_issues) | set(merged) | set(closed))
     return {
         "weeks": weeks,
