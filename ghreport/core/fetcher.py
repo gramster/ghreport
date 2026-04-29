@@ -85,10 +85,26 @@ def _get_rate_limit_reset(exc: Exception) -> datetime | None:
     return None
 
 
-def _set_rate_limit_cooldown(exc: Exception) -> None:
-    """Set the global cooldown based on the exception's reset info."""
+def _query_error_reset(exc: Exception, gh) -> datetime | None:
+    """For GraphQL QueryErrors, gidgethub updates ``gh.rate_limit`` from the
+    response headers *before* raising the error.  Use that to get the exact
+    reset datetime rather than falling back to a fixed cooldown guess."""
+    if not isinstance(exc, gidgethub.QueryError):
+        return None
+    rl = getattr(gh, 'rate_limit', None)
+    if rl and hasattr(rl, 'reset_datetime') and rl.reset_datetime:
+        return rl.reset_datetime
+    return None
+
+
+def _set_rate_limit_cooldown(exc: Exception, reset_dt: datetime | None = None) -> None:
+    """Set the global cooldown based on the exception's reset info.
+
+    *reset_dt* overrides the value extracted from *exc*, allowing callers to
+    supply a reset time obtained via other means (e.g. ``gh.rate_limit``).
+    """
     global _rate_limit_until
-    reset = _get_rate_limit_reset(exc)
+    reset = reset_dt or _get_rate_limit_reset(exc)
     if reset:
         # Add a small buffer so we don't hit the boundary
         _rate_limit_until = reset + timedelta(seconds=5)
@@ -146,7 +162,7 @@ async def _graphql_with_retry(gh, query, *, cursor=None, chunk=100, repo_key=Non
                 if repo_key and repo_key in _active_retries:
                     del _active_retries[repo_key]
                 if is_rate_limit:
-                    _set_rate_limit_cooldown(exc)
+                    _set_rate_limit_cooldown(exc, reset_dt=_query_error_reset(exc, gh))
                     raise GitHubRateLimitError(str(exc)) from exc
                 raise
 
@@ -155,7 +171,7 @@ async def _graphql_with_retry(gh, query, *, cursor=None, chunk=100, repo_key=Non
             if is_rate_limit:
                 if repo_key and repo_key in _active_retries:
                     del _active_retries[repo_key]
-                _set_rate_limit_cooldown(exc)
+                _set_rate_limit_cooldown(exc, reset_dt=_query_error_reset(exc, gh))
                 raise GitHubRateLimitError(str(exc)) from exc
 
             # Non-rate-limit transient error: retry with backoff
