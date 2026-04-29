@@ -116,10 +116,12 @@ async def check_date_coverage(
                 "data_since": data_since,
                 "requested_since": since,
             })
-            # Trigger backfill in background
-            asyncio.create_task(
-                scheduler.backfill(r["owner"], r["name"], since_dt)
-            )
+            # Trigger backfill in background (skip if rate-limited — the
+            # task would fail immediately; the next coverage poll will retry)
+            if not scheduler.rate_limited_until:
+                asyncio.create_task(
+                    scheduler.backfill(r["owner"], r["name"], since_dt)
+                )
             continue
 
         # Also check for missing merged/closed PR history: if a repo has been
@@ -135,9 +137,11 @@ async def check_date_coverage(
                         "owner": owner, "name": name,
                         "reason": "missing_pr_history",
                     })
-                    asyncio.create_task(
-                        scheduler.backfill(r["owner"], r["name"], since_dt)
-                    )
+                    # Skip if rate-limited — the next coverage poll will retry
+                    if not scheduler.rate_limited_until:
+                        asyncio.create_task(
+                            scheduler.backfill(r["owner"], r["name"], since_dt)
+                        )
 
     return {
         "covered": len(gaps) == 0,

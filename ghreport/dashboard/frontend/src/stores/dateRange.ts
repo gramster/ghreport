@@ -87,11 +87,23 @@ export const useDateRangeStore = defineStore('dateRange', () => {
         // continue polling
       }
     }
+    // 2-minute window expired without success (e.g. rate-limited).
+    // Schedule a retry so the backfill eventually runs once the rate
+    // limit clears, without requiring the user to change the date.
     backfilling.value = false
+    setTimeout(() => {
+      if (since.value === sinceVal && lastCoveredSince !== sinceVal) {
+        checkCoverage(sinceVal)
+      }
+    }, 5 * 60 * 1000)
   }
 
   // Incremented when a backfill completes, so views can refetch
   const coverageVersion = ref(0)
+
+  // Check coverage immediately on store init (catches cases where the
+  // app reloads after a previous poll timed out or a rate limit)
+  checkCoverage(since.value)
 
   return { since, until, params, effectiveDays, backfilling, coverageVersion }
 })
