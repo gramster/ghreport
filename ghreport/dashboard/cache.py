@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-from ..core.fetcher import get_raw_issues, get_raw_pull_requests
+from ..core.fetcher import get_raw_issues, get_raw_pull_requests, GitHubRateLimitError
 from ..core.models import Event, Issue, PullRequest
 from ..core.parser import parse_raw_issue, parse_raw_pull_request, utc_to_local, format_date
 from ..core.teams import get_members
@@ -82,12 +82,24 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
         return await _sync_repo_inner(db, owner, repo, token, repo_id, sync_id,
                                        team=team, force=force,
                                        backfill_since=backfill_since)
+    except GitHubRateLimitError as exc:
+        # Rate-limit mid-sync: commit whatever partial data was fetched.
+        # All upserts are idempotent so partial data is safe to keep.
+        # sync_start_at/data_since are NOT updated, so the next sync
+        # re-covers the same window and fills in what was missed.
+        await db.db.commit()
+        completed_str = datetime.utcnow().isoformat()
+        error_msg = f"{type(exc).__name__}: {exc}"
+        await db.db.execute(
+            "UPDATE sync_log SET completed_at = ?, status = 'partial', "
+            "error_message = ? WHERE id = ?",
+            (completed_str, error_msg, sync_id),
+        )
+        await db.db.commit()
+        raise
     except Exception as exc:
-        # Roll back any partial data writes (issues/PRs upserted before the
-        # failure) so the DB stays consistent.  The sync_log INSERT above was
-        # already committed, so it is not affected by this rollback.
+        # Other errors: roll back to avoid leaving inconsistent data.
         await db.db.rollback()
-        # Record the failure in a fresh transaction.
         completed_str = datetime.utcnow().isoformat()
         error_msg = f"{type(exc).__name__}: {exc}"
         await db.db.execute(
