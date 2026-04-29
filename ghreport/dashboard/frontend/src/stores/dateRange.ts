@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import axios from 'axios'
+import { useSyncActivityStore } from './syncActivity'
 
 function fmt(d: Date): string {
   return d.toISOString().slice(0, 10)
@@ -48,6 +49,15 @@ export const useDateRangeStore = defineStore('dateRange', () => {
     if (checkTimer) clearTimeout(checkTimer)
     // Debounce to avoid rapid-fire calls while typing
     checkTimer = setTimeout(() => checkCoverage(val), 500)
+  })
+
+  // When the rate limit clears, immediately retry coverage check so the
+  // backfill starts without waiting for the 5-minute deferred retry.
+  const syncActivity = useSyncActivityStore()
+  watch(() => syncActivity.isRateLimited, (limited, wasLimited) => {
+    if (wasLimited && !limited && lastCoveredSince !== since.value) {
+      checkCoverage(since.value)
+    }
   })
 
   async function checkCoverage(sinceVal: string) {
