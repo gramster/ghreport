@@ -274,3 +274,17 @@ class Database:
         )).fetchone()
         return row[0] if row else None
         await self.db.commit()
+
+    async def count_prs(self, repo_id: int, state: str | None = None) -> int:
+        """Return PR count for a repo, optionally filtered by state."""
+        if state:
+            row = await (await self.db.execute(
+                "SELECT COUNT(*) FROM pull_requests WHERE repo_id = ? AND state = ?",
+                (repo_id, state),
+            )).fetchone()
+        else:
+            row = await (await self.db.execute(
+                "SELECT COUNT(*) FROM pull_requests WHERE repo_id = ?",
+                (repo_id,),
+            )).fetchone()
+        return row[0] if row else 0

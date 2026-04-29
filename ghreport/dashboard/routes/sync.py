@@ -120,6 +120,24 @@ async def check_date_coverage(
             asyncio.create_task(
                 scheduler.backfill(r["owner"], r["name"], since_dt)
             )
+            continue
+
+        # Also check for missing merged/closed PR history: if a repo has been
+        # synced, has open PRs, but no merged/closed PRs at all, the initial
+        # sync likely missed historical PR data. Trigger a backfill to repair.
+        if r["last_synced_at"]:
+            open_prs = await db.count_prs(r["id"], state="open")
+            if open_prs > 0:
+                merged = await db.count_prs(r["id"], state="merged")
+                closed = await db.count_prs(r["id"], state="closed")
+                if merged + closed == 0:
+                    gaps.append({
+                        "owner": owner, "name": name,
+                        "reason": "missing_pr_history",
+                    })
+                    asyncio.create_task(
+                        scheduler.backfill(r["owner"], r["name"], since_dt)
+                    )
 
     return {
         "covered": len(gaps) == 0,
