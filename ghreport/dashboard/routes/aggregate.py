@@ -37,12 +37,15 @@ router = APIRouter(prefix="/api/aggregate", tags=["aggregate"])
 
 async def _collect_all_issues(request: Request, state: str | None = None,
                               since_dt=None, until_dt=None,
-                              enrich_response: bool = False):
+                              enrich_response: bool = False,
+                              exclude: set[str] | None = None):
     """Collect issues across all repos, optionally filtered by date."""
     db = request.app.state.db
     repos = await db.get_all_repos()
     all_issues = []
     for r in repos:
+        if exclude and f"{r['owner']}/{r['name']}" in exclude:
+            continue
         issues = await get_cached_issues(db, r["id"], state=state)
         issues = filter_active_issues(issues, since_dt, until_dt)
         if enrich_response:
@@ -53,12 +56,15 @@ async def _collect_all_issues(request: Request, state: str | None = None,
 
 
 async def _collect_all_prs(request: Request, state: str | None = None,
-                           since_dt=None, until_dt=None):
+                           since_dt=None, until_dt=None,
+                           exclude: set[str] | None = None):
     """Collect PRs across all repos, optionally filtered by date."""
     db = request.app.state.db
     repos = await db.get_all_repos()
     all_prs = []
     for r in repos:
+        if exclude and f"{r['owner']}/{r['name']}" in exclude:
+            continue
         prs = await get_cached_prs(db, r["id"], state=state)
         prs = filter_active_prs(prs, since_dt, until_dt)
         all_prs.extend(prs)
@@ -70,12 +76,14 @@ async def aggregate_summary(
     request: Request,
     since: str | None = Query(None),
     until: str | None = Query(None),
+    exclude: list[str] = Query(default=[]),
 ):
     """Combined issue/PR counts across all repos."""
     db = request.app.state.db
     repos = await db.get_all_repos()
     since_dt = parse_date_param(since)
     until_dt = parse_date_param(until, end_of_day=True)
+    excluded = set(exclude)
 
     total_open_issues = 0
     total_closed_issues = 0
@@ -86,6 +94,8 @@ async def aggregate_summary(
 
     for r in repos:
         rid = r["id"]
+        if f"{r['owner']}/{r['name']}" in excluded:
+            continue
         open_i = len(filter_active_issues(await get_cached_issues(db, rid, state="open"), since_dt, until_dt))
         closed_i = len(filter_active_issues(await get_cached_issues(db, rid, state="closed"), since_dt, until_dt))
         open_p = len(filter_active_prs(await get_cached_prs(db, rid, state="open"), since_dt, until_dt))
@@ -122,59 +132,61 @@ async def aggregate_chart(
     min_count: int = Query(5, ge=1),
     since: str | None = Query(None),
     until: str | None = Query(None),
+    exclude: list[str] = Query(default=[]),
 ):
     """Cross-repo chart data (merged from all repos)."""
     since_dt = parse_date_param(since)
     until_dt = parse_date_param(until, end_of_day=True)
+    excluded: set[str] = set(exclude)
 
     if chart_type == "open-issues":
-        issues = await _collect_all_issues(request, since_dt=since_dt, until_dt=until_dt)
+        issues = await _collect_all_issues(request, since_dt=since_dt, until_dt=until_dt, exclude=excluded)
         end = until_dt or datetime.now(tz=timezone.utc)
         start = since_dt or (end - timedelta(days=months * 30))
         return open_issue_counts_data(start, end, issues, bug_labels=["bug"])
     elif chart_type == "time-to-merge":
-        prs = await _collect_all_prs(request, state="merged", since_dt=since_dt, until_dt=until_dt)
+        prs = await _collect_all_prs(request, state="merged", since_dt=since_dt, until_dt=until_dt, exclude=excluded)
         return time_to_merge_data(prs)
     elif chart_type == "time-to-close":
-        issues = await _collect_all_issues(request, state="closed", since_dt=since_dt, until_dt=until_dt)
+        issues = await _collect_all_issues(request, state="closed", since_dt=since_dt, until_dt=until_dt, exclude=excluded)
         return time_to_close_issues_data(issues)
     elif chart_type == "time-to-response":
         open_issues = await _collect_all_issues(request, state="open", since_dt=since_dt, until_dt=until_dt,
-                                                enrich_response=True)
+                                                enrich_response=True, exclude=excluded)
         closed_issues = await _collect_all_issues(request, state="closed", since_dt=since_dt, until_dt=until_dt,
-                                                  enrich_response=True)
+                                                  enrich_response=True, exclude=excluded)
         resp_since = since_dt or (datetime.now(tz=timezone.utc) - timedelta(days=months * 30))
         return time_to_first_response_data(open_issues, closed_issues, since=resp_since)
     elif chart_type == "label-frequency":
-        issues = await _collect_all_issues(request, state="open", since_dt=since_dt, until_dt=until_dt)
+        issues = await _collect_all_issues(request, state="open", since_dt=since_dt, until_dt=until_dt, exclude=excluded)
         return label_frequency_data(issues)
     elif chart_type == "files-changed":
-        prs = await _collect_all_prs(request, since_dt=since_dt, until_dt=until_dt)
+        prs = await _collect_all_prs(request, since_dt=since_dt, until_dt=until_dt, exclude=excluded)
         return files_changed_data(prs)
     elif chart_type == "lines-changed":
-        prs = await _collect_all_prs(request, since_dt=since_dt, until_dt=until_dt)
+        prs = await _collect_all_prs(request, since_dt=since_dt, until_dt=until_dt, exclude=excluded)
         return lines_changed_data(prs)
     elif chart_type == "top-terms":
-        issues = await _collect_all_issues(request, since_dt=since_dt, until_dt=until_dt)
+        issues = await _collect_all_issues(request, since_dt=since_dt, until_dt=until_dt, exclude=excluded)
         return top_terms_data(issues, min_count=min_count)
     elif chart_type == "top-files":
-        prs = await _collect_all_prs(request, since_dt=since_dt, until_dt=until_dt)
+        prs = await _collect_all_prs(request, since_dt=since_dt, until_dt=until_dt, exclude=excluded)
         return top_files_data(prs, min_count=min_count)
     elif chart_type == "time-to-combined":
         merged_prs = await _collect_all_prs(
             request, state="merged",
-            since_dt=since_dt, until_dt=until_dt)
+            since_dt=since_dt, until_dt=until_dt, exclude=excluded)
         closed_issues = await _collect_all_issues(
             request, state="closed",
-            since_dt=since_dt, until_dt=until_dt)
+            since_dt=since_dt, until_dt=until_dt, exclude=excluded)
         open_issues = await _collect_all_issues(
             request, state="open",
             since_dt=since_dt, until_dt=until_dt,
-            enrich_response=True)
+            enrich_response=True, exclude=excluded)
         enrich_resp_issues = await _collect_all_issues(
             request, state="closed",
             since_dt=since_dt, until_dt=until_dt,
-            enrich_response=True)
+            enrich_response=True, exclude=excluded)
         resp_since = since_dt or (
             datetime.now(tz=timezone.utc)
             - timedelta(days=months * 30))
@@ -183,13 +195,13 @@ async def aggregate_chart(
             open_issues, since=resp_since)
     elif chart_type == "activity-counts":
         issues = await _collect_all_issues(
-            request, since_dt=since_dt, until_dt=until_dt)
+            request, since_dt=since_dt, until_dt=until_dt, exclude=excluded)
         merged_prs = await _collect_all_prs(
             request, state="merged",
-            since_dt=since_dt, until_dt=until_dt)
+            since_dt=since_dt, until_dt=until_dt, exclude=excluded)
         closed_prs = await _collect_all_prs(
             request, state="closed",
-            since_dt=since_dt, until_dt=until_dt)
+            since_dt=since_dt, until_dt=until_dt, exclude=excluded)
         return activity_counts_weekly_data(
             issues, merged_prs, closed_prs,
             since=since_dt, until=until_dt)

@@ -13,6 +13,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import axios from 'axios'
 import { useDateRangeStore } from '@/stores/dateRange'
+import { useExcludedReposStore } from '@/stores/excludedRepos'
 import OpenIssueChart from '@/components/charts/OpenIssueChart.vue'
 import MonthBoxChart from '@/components/charts/MonthBoxChart.vue'
 import LabelBarChart from '@/components/charts/LabelBarChart.vue'
@@ -29,6 +30,7 @@ const props = defineProps<{
 }>()
 
 const dateRange = useDateRangeStore()
+const excludedRepos = useExcludedReposStore()
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const chartData = ref<any>(null)
@@ -54,7 +56,11 @@ async function fetchData() {
     const url = props.aggregate
       ? `/api/aggregate/charts/${props.chartType}`
       : `/api/repos/${props.owner}/${props.repo}/charts/${props.chartType}`
-    const { data } = await axios.get(url, { params: dateRange.params })
+    const params: Record<string, unknown> = { ...dateRange.params }
+    if (props.aggregate && excludedRepos.excludeParams.length) {
+      params.exclude = excludedRepos.excludeParams
+    }
+    const { data } = await axios.get(url, { params })
     chartData.value = data
   } catch (e: unknown) {
     error.value = 'Failed to load chart data'
@@ -64,5 +70,5 @@ async function fetchData() {
 }
 
 onMounted(fetchData)
-watch(() => [dateRange.since, dateRange.until, dateRange.coverageVersion], fetchData)
+watch(() => [dateRange.since, dateRange.until, dateRange.coverageVersion, excludedRepos.excludeParams], fetchData)
 </script>
