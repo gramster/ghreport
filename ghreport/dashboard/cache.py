@@ -59,7 +59,8 @@ def _collect_copilot_users(raw: dict, found: set[str]):
 
 async def sync_repo(db: Database, owner: str, repo: str, token: str,
                     team: str | None = None, force: bool = False,
-                    backfill_since: datetime | None = None) -> dict:
+                    backfill_since: datetime | None = None,
+                    backfill_until: datetime | None = None) -> dict:
     """Fetch data from GitHub and upsert into SQLite.
 
     If *backfill_since* is given, only fetch data created/updated since that
@@ -81,7 +82,8 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
     try:
         return await _sync_repo_inner(db, owner, repo, token, repo_id, sync_id,
                                        team=team, force=force,
-                                       backfill_since=backfill_since)
+                                       backfill_since=backfill_since,
+                                       backfill_until=backfill_until)
     except GitHubRateLimitError as exc:
         # Rate-limit mid-sync: commit whatever partial data was fetched.
         # All upserts are idempotent so partial data is safe to keep.
@@ -114,7 +116,8 @@ async def sync_repo(db: Database, owner: str, repo: str, token: str,
 async def _sync_repo_inner(db: Database, owner: str, repo: str, token: str,
                             repo_id: int, sync_id: int, *,
                             team: str | None = None, force: bool = False,
-                            backfill_since: datetime | None = None) -> dict:
+                            backfill_since: datetime | None = None,
+                            backfill_until: datetime | None = None) -> dict:
 
     # Capture sync start time *before* any GitHub fetching.
     # This becomes covered_until after the sync completes, ensuring the
@@ -172,9 +175,14 @@ async def _sync_repo_inner(db: Database, owner: str, repo: str, token: str,
     incremental = since is not None
     repo_key = f"{owner}/{repo}"
     for state in ('open', 'closed'):
+        # In chunked backfill mode, skip 'open' — those are kept current by
+        # regular incremental syncs. Only fetch closed issues created in the chunk.
+        if backfill_until and state == 'open':
+            continue
         raw_issues = await get_raw_issues(
             owner, repo, token, state=state,
-            since=since, use_updated=incremental,
+            since=since, until=backfill_until,
+            use_updated=incremental and backfill_until is None,
             repo_key=repo_key,
         )
         for raw in raw_issues:
@@ -189,9 +197,13 @@ async def _sync_repo_inner(db: Database, owner: str, repo: str, token: str,
     # For incremental sync, only fetch PRs updated since last sync.
     prs_count = 0
     for state in ('open', 'closed', 'merged'):
+        # In chunked backfill mode, skip 'open' — already current.
+        if backfill_until and state == 'open':
+            continue
         s = since if (incremental or state != 'open') else None
         raw_prs = await get_raw_pull_requests(owner, repo, token, state=state, since=s,
-                                              use_updated=incremental,
+                                              until=backfill_until,
+                                              use_updated=incremental and backfill_until is None,
                                               repo_key=repo_key)
         for raw in raw_prs:
             _collect_copilot_users(raw, copilot_users)

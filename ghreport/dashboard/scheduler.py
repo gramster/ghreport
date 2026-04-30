@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
-
+from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from .cache import sync_repo
@@ -164,12 +163,115 @@ class SyncScheduler:
                 break  # rate-limited
 
     async def backfill(self, owner: str, repo: str, since: datetime):
-        """Fetch older data for a repo to cover a requested date range."""
+        """Fetch older data for a repo one week at a time, expanding the known-good
+        window backward until ``data_since <= since``.
+
+        If ``data_since`` is already at or before ``since`` (e.g. the
+        missing_pr_history case where data_since is accurate but data is
+        incomplete), fall back to a single full-range sync so the repair runs.
+        """
         key = f"{owner}/{repo}"
         if key in self._active_backfills:
             return  # already running
-        async with self._sync_lock:
-            await self._sync_one_repo(owner, repo, backfill_since=since)
+
+        CHUNK_DAYS = 7
+        team = _team_for(self.settings, owner, repo)
+        self._active_backfills.add(key)
+        try:
+            # Determine starting data_since for this backfill
+            repo_id = await self.db.get_repo_id(owner, repo)
+            if not repo_id:
+                return
+            current_data_since_str = await self.db.get_data_since(repo_id)
+
+            if not current_data_since_str:
+                # Never synced — let the regular sync handle it
+                return
+
+            current_data_since = datetime.fromisoformat(current_data_since_str)
+            if current_data_since.tzinfo is None:
+                current_data_since = current_data_since.replace(tzinfo=timezone.utc)
+
+            if current_data_since <= since:
+                # data_since already covers the requested window, but data may be
+                # incomplete (e.g. missing_pr_history). Run a single full-range sync
+                # from data_since so the repair covers the entire claimed period.
+                logger.info(
+                    "Backfill for %s/%s: data_since=%s already covers since=%s "
+                    "— running full repair sync",
+                    owner, repo, current_data_since.date(), since.date(),
+                )
+                self._active_syncs.add(key)
+                try:
+                    async with self._sync_lock:
+                        await sync_repo(
+                            self.db, owner, repo,
+                            self.settings.github_token, team=team,
+                            backfill_since=current_data_since,
+                        )
+                except GitHubRateLimitError:
+                    logger.warning("Rate-limited during repair sync of %s/%s", owner, repo)
+                except Exception as exc:
+                    logger.exception("Repair sync failed for %s/%s", owner, repo)
+                    self._record_error(owner, repo, exc)
+                finally:
+                    self._active_syncs.discard(key)
+                return
+
+            # Chunked backward fill: one week at a time from data_since toward since
+            while True:
+                if self._check_rate_limit():
+                    break
+
+                # Re-read data_since each iteration — it advances after each chunk
+                repo_id = await self.db.get_repo_id(owner, repo)
+                if not repo_id:
+                    break
+                current_data_since_str = await self.db.get_data_since(repo_id)
+                if not current_data_since_str:
+                    break
+                current_data_since = datetime.fromisoformat(current_data_since_str)
+                if current_data_since.tzinfo is None:
+                    current_data_since = current_data_since.replace(tzinfo=timezone.utc)
+
+                if current_data_since <= since:
+                    logger.info(
+                        "Backfill complete for %s/%s (data_since=%s)",
+                        owner, repo, current_data_since.date(),
+                    )
+                    break
+
+                chunk_start = max(since, current_data_since - timedelta(days=CHUNK_DAYS))
+                chunk_end = current_data_since
+
+                self._active_syncs.add(key)
+                try:
+                    async with self._sync_lock:
+                        result = await sync_repo(
+                            self.db, owner, repo,
+                            self.settings.github_token, team=team,
+                            backfill_since=chunk_start,
+                            backfill_until=chunk_end,
+                        )
+                    logger.info(
+                        "Backfill chunk [%s \u2192 %s] for %s/%s: %d issues, %d PRs",
+                        chunk_start.date(), chunk_end.date(), owner, repo,
+                        result["issues_fetched"], result["prs_fetched"],
+                    )
+                except GitHubRateLimitError:
+                    logger.warning(
+                        "Rate-limited during backfill of %s/%s — will retry when limit clears",
+                        owner, repo,
+                    )
+                    break
+                except Exception as exc:
+                    logger.exception("Backfill chunk failed for %s/%s", owner, repo)
+                    self._record_error(owner, repo, exc)
+                    break
+                finally:
+                    self._active_syncs.discard(key)
+        finally:
+            self._active_backfills.discard(key)
 
     def is_backfilling(self, owner: str, repo: str) -> bool:
         return f"{owner}/{repo}" in self._active_backfills

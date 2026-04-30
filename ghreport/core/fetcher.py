@@ -493,6 +493,7 @@ query ($cursor: String, $chunk: Int) {{
 
 async def get_raw_pull_requests(owner: str, repo: str, token: str, state: str = 'open',
                                 chunk: int = 50, since: datetime | None = None,
+                                until: datetime | None = None,
                                 use_updated: bool = False,
                                 verbose: bool = False, debug_log_list: list[str] | None = None,
                                 repo_key: str | None = None) -> list[dict]:
@@ -507,7 +508,7 @@ async def get_raw_pull_requests(owner: str, repo: str, token: str, state: str = 
         since = datetime.now() - timedelta(days=365)
 
     since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%d')
-    until_str = datetime.now().astimezone(pytz.utc).strftime('%Y-%m-%d')
+    until_str = (until or datetime.now()).astimezone(pytz.utc).strftime('%Y-%m-%d')
 
     async with httpx.AsyncClient(timeout=60) as client:
         gh = gidgethub.httpx.GitHubAPI(client, owner, oauth_token=token)
@@ -515,7 +516,13 @@ async def get_raw_pull_requests(owner: str, repo: str, token: str, state: str = 
             query = merged_pull_requests_query.format(owner=owner, repo=repo,
                                                       since=since_str, until=until_str)
         else:
-            since_filter = f'updated:>={since_str}' if (state == 'closed' or use_updated) else f'created:>={since_str}'
+            if until:
+                # Chunked backfill: use closed:>= closed:<= to stay within the window
+                since_filter = f'closed:>={since_str} closed:<={until_str}'
+            elif state == 'closed' or use_updated:
+                since_filter = f'updated:>={since_str}'
+            else:
+                since_filter = f'created:>={since_str}'
             query = pull_requests_query.format(owner=owner, repo=repo, state=state,
                                                since_filter=since_filter)
 
@@ -547,7 +554,8 @@ async def get_raw_pull_requests(owner: str, repo: str, token: str, state: str = 
 
 async def get_raw_issues(owner: str, repo: str, token: str, state: str = 'open',
                          chunk: int = 100, include_comments: bool = True,
-                         since: datetime | None = None, use_updated: bool = False,
+                         since: datetime | None = None, until: datetime | None = None,
+                         use_updated: bool = False,
                          verbose: bool = False,
                          debug_log_list: list[str] | None = None,
                          repo_key: str | None = None) -> list[dict]:
@@ -562,8 +570,13 @@ async def get_raw_issues(owner: str, repo: str, token: str, state: str = 'open',
         since = datetime.now() - timedelta(days=365)
 
     since_str = since.astimezone(pytz.utc).strftime('%Y-%m-%d')
-    filter_key = 'updated' if use_updated else 'created'
-    since_filter = f'{filter_key}:>={since_str}'
+    if until:
+        # Chunked backfill: bound by creation date to stay within the window
+        until_str = until.astimezone(pytz.utc).strftime('%Y-%m-%d')
+        since_filter = f'created:>={since_str} created:<={until_str}'
+    else:
+        filter_key = 'updated' if use_updated else 'created'
+        since_filter = f'{filter_key}:>={since_str}'
 
     async with httpx.AsyncClient(timeout=60) as client:
         gh = gidgethub.httpx.GitHubAPI(client, owner, oauth_token=token)
