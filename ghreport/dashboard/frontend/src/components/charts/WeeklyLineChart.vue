@@ -1,11 +1,16 @@
 <template>
   <div style="position: relative; height: 260px;">
+    <div class="chart-toolbar">
+      <button class="toggle-btn" :class="{ active: showMA }" @click="showMA = !showMA" title="Toggle 4-week moving average">
+        4w avg
+      </button>
+    </div>
     <Line :data="chartConfig" :options="options" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Line } from 'vue-chartjs'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, PointElement,
@@ -23,6 +28,17 @@ const props = defineProps<{
   seriesConfig?: { key: string; label: string; color: string }[]
 }>()
 
+const showMA = ref(false)
+const MA_WINDOW = 4
+
+function movingAverage(values: (number | null)[]): (number | null)[] {
+  return values.map((_, i) => {
+    const slice = values.slice(Math.max(0, i - MA_WINDOW + 1), i + 1).filter(v => v != null) as number[]
+    if (slice.length === 0) return null
+    return Math.round(slice.reduce((a, b) => a + b, 0) / slice.length * 10) / 10
+  })
+}
+
 const defaultColors = [
   { bg: 'rgba(54, 162, 235, 0.5)', border: 'rgba(54, 162, 235, 1)' },
   { bg: 'rgba(255, 99, 132, 0.5)', border: 'rgba(255, 99, 132, 1)' },
@@ -39,15 +55,17 @@ const chartConfig = computed(() => {
   const datasets = seriesKeys.map((key, i) => {
     const cfg = props.seriesConfig?.find(s => s.key === key)
     const color = defaultColors[i % defaultColors.length]
+    const raw = props.data[key] as (number | null)[]
+    const values = showMA.value ? movingAverage(raw) : raw
     return {
       label: cfg?.label || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-      data: props.data[key] as (number | null)[],
+      data: values,
       borderColor: cfg?.color || color.border,
       backgroundColor: cfg?.color || color.bg,
-      tension: 0.3,
+      tension: showMA.value ? 0.5 : 0.3,
       spanGaps: true,
-      pointRadius: 1.5,
-      borderWidth: 1.5,
+      pointRadius: showMA.value ? 0 : 1.5,
+      borderWidth: showMA.value ? 2 : 1.5,
       fill: false,
     }
   })
@@ -102,3 +120,30 @@ const options = computed(() => ({
   },
 }))
 </script>
+
+<style scoped>
+.chart-toolbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+}
+.toggle-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #f5f5f5;
+  color: #555;
+  cursor: pointer;
+  line-height: 1.6;
+}
+.toggle-btn:hover {
+  background: #e8e8e8;
+}
+.toggle-btn.active {
+  background: #4e89d4;
+  border-color: #3a6fb5;
+  color: #fff;
+}
+</style>
